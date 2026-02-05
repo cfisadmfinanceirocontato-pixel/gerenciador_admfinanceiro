@@ -10,5 +10,5 @@ import yfinance as yf
 #criar a interface do streamlit
 st.write("""
 # Análise de preços de ações
-O gráfico abaixo representa a evolução do preço de uma acão ao longo do tempo         
+TESTANTO ATUALIZAÇÕES       
 """) # Markdown
