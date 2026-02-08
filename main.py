@@ -1,14 +1,16 @@
-# Importar as bibliotecas
 import streamlit as st
 import pandas as pd
-import yfinance as yf
 
-# Criar as funções de carregamento de dados
+st.set_page_config(page_title="Cfis App Financeiro")
 
-#preparar as visualizações
+st.markdown("""
+# Boas-vindas ao Cfis App Financeiro!
 
-#criar a interface do streamlit
-st.write("""
-# Análise de preços de ações
-TESTANTO ATUALIZAÇÕES       
-""") # Markdown
+## O app foi desenvolvido para auxiliar no controle financeiro.
+            
+""")
+st.cache_data
+file_uplpad = st.file_uploader("Faça o upload do seu arquivo CSV para começar a usar o app.", type=["csv"])
+if file_uplpad is not None:
+    df = pd.read_csv(file_uplpad)
+    st.dataframe(df, hide_index=True)
