@@ -10,7 +10,11 @@ st.markdown("""
             
 """)
 
+st.sidebar.header("🏤 Cfis App Financeiro")
+
+st.cache_data
 file_uplpad = st.file_uploader("Faça o upload do seu arquivo CSV para começar a usar o app.", type=["csv"])
 if file_uplpad is not None:
     df = pd.read_csv(file_uplpad)
     st.dataframe(df, hide_index=True)
+
