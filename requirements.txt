@@ -41,8 +41,7 @@ psutil @ file:///D:/bld/bld/rattler-build_psutil_1769678167/work
 pure_eval @ file:///home/conda/feedstock_root/build_artifacts/pure_eval_1733569405015/work
 pyarrow==23.0.0
 pydeck==0.9.1
-Pygments @ file:///home/conda/feedstock_root/build_artifacts/pygments_1750615794071/work
-pyodbc==5.3.0
+Pygments @ file:///home/conda/feedstock_root/build_artifacts/pygments_1750615794071/wor
 python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-dateutil_1751104122/work
 pytz==2025.2
 pywin32 @ file:///D:/bld/bld/rattler-build_pywin32_1756487145/work
