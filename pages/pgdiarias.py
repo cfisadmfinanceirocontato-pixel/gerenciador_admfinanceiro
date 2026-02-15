@@ -259,7 +259,7 @@ with col_valor1:
 
 with col_data1:
     st.markdown("**📅 Data**")
-    data_selecionada = st.date_input("", value=datetime.now().date(), label_visibility="collapsed", key="date_hidden")
+    data_selecionada = st.date_input("", value=datetime.now().date(), label_visibility="collapsed", key="date_hidden", format="DD/MM/YYYY")
     data_display = formatar_data_completa(data_selecionada)
     st.text_input("Por extenso:", value=data_display, disabled=True)
     data_input = formatar_data_csv(data_selecionada)
