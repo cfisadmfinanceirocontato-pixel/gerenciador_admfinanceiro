@@ -263,7 +263,7 @@ with col_acoes1:
         st.rerun()
 
 with col_acoes2:
-    st.markdown("**⚙️ Ferramentas**")
+    #st.markdown("**⚙️ Ferramentas**")
     col2_btn1, col2_btn2 = st.columns(2)
     with col2_btn1:
         if st.button("🔄 Atualizar", use_container_width=True):
