@@ -1,67 +1,171 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date
 import io
 
-st.set_page_config(page_title="Pagto Diárias", page_icon="📋", layout="wide", initial_sidebar_state="expanded")
+# ============================================================================
+# CONFIGURAÇÃO DA APLICAÇÃO
+# ============================================================================
+st.set_page_config(
+    page_title="Pagto Diárias", 
+    page_icon="📋", 
+    layout="wide", 
+    initial_sidebar_state="expanded"
+)
 
-st.title("📋 Pagamento de Diárias")
-st.markdown("---")
+# ============================================================================
+# FUNÇÕES DE FORMATAÇÃO
+# ============================================================================
+def formatar_data_completa(data_obj):
+    """01 de janeiro de 2026"""
+    if pd.isna(data_obj) or data_obj == '':
+        return "14 de fevereiro de 2026"
+    try:
+        if isinstance(data_obj, date):
+            data = data_obj
+        else:
+            data = pd.to_datetime(data_obj, dayfirst=True).date()
+        
+        meses = {
+            1: 'janeiro', 2: 'fevereiro', 3: 'março', 4: 'abril',
+            5: 'maio', 6: 'junho', 7: 'julho', 8: 'agosto',
+            9: 'setembro', 10: 'outubro', 11: 'novembro', 12: 'dezembro'
+        }
+        return f"{data.day:02d} de {meses[data.month]} de {data.year}"
+    except:
+        return "14 de fevereiro de 2026"
 
-def formatar_data(data_obj):
+def formatar_data_csv(data_obj):
+    """DD/MM/YYYY para CSV"""
     if pd.isna(data_obj) or data_obj == '':
         return datetime.now().strftime("%d/%m/%Y")
     try:
+        if isinstance(data_obj, date):
+            return data_obj.strftime("%d/%m/%Y")
         return pd.to_datetime(data_obj, dayfirst=True).strftime("%d/%m/%Y")
     except:
         return str(data_obj)
 
-# ✅ FORMATAÇÃO MOEDA REAL BR
 def formatar_moeda(valor):
+    """R$ 1.234,56"""
     try:
-        valor_num = float(valor)
-        return f"R$ {valor_num:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        return f"R$ {float(valor):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     except:
         return "R$ 0,00"
 
+# ============================================================================
+# FUNÇÕES DE CONVERSÃO POR EXTENSO
+# ============================================================================
+def numero_extenso(n):
+    """Função base para números por extenso (0-999)"""
+    if n == 0: return ''
+    unidades = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove']
+    dezenas = ['', 'dez', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa']
+    centenas = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos']
+    
+    if n < 10: return unidades[n]
+    elif n < 100:
+        d, u = divmod(n, 10)
+        if u == 0: return dezenas[d]
+        return f"{dezenas[d]} e {unidades[u]}"
+    else:
+        c, resto = divmod(n, 100)
+        if resto == 0:
+            return 'cem' if c == 1 else centenas[c]
+        return f"{'cem' if c == 1 else centenas[c]} e {numero_extenso(resto)}"
+
+def quantidade_por_extenso(qtd_str):
+    """CORRIGIDO: 0,5→meia | 1,5→uma e meia | 2,5→duas e meia"""
+    try:
+        qtd_num = float(qtd_str.replace(',', '.'))
+        inteira = int(qtd_num)
+        decimal = int((qtd_num - inteira) * 10 + 0.5)
+        
+        # ✅ NOMENCLATURA CORRIGIDA EXATAMENTE COMO SOLICITADO
+        if decimal == 5:
+            if inteira == 0:
+                return "meia"
+            elif inteira == 1:
+                return "uma e meia"
+            elif inteira == 2:
+                return "duas e meia"
+            elif inteira == 3:
+                return "três e meia"
+            elif inteira == 4:
+                return "quatro e meia"
+        return numero_extenso(inteira)
+    except:
+        return "quantidade inválida"
+
+def valor_por_extenso(valor_str):
+    """R$ 210,00 → duzentos e dez reais"""
+    try:
+        valor_limpo = valor_str.replace('R$', '').replace('.', '').replace(',', '.').strip()
+        valor_num = float(valor_limpo)
+        reais = int(valor_num)
+        centavos = int((valor_num - reais) * 100 + 0.5)
+        
+        texto_reais = numero_extenso(reais)
+        if reais == 1: texto_reais += " real"
+        elif reais == 0: texto_reais = "zero"
+        else: texto_reais += " reais"
+        
+        if centavos > 0:
+            texto_centavos = numero_extenso(centavos)
+            sufixo = " centavo" if centavos == 1 else " centavos"
+            return f"{texto_reais} e {texto_centavos}{sufixo}"
+        return texto_reais
+    except:
+        return "valor inválido"
+
+# ============================================================================
+# FUNÇÕES DE DADOS
+# ============================================================================
 @st.cache_data
 def carregar_dados():
+    """Carrega dados do CSV ou cria estrutura vazia"""
     try:
-        dados_diarias = pd.read_csv("diarias_data.csv")
-        if 'Data' in dados_diarias.columns:
-            dados_diarias['Data'] = dados_diarias['Data'].apply(formatar_data)
+        dados = pd.read_csv("diarias_data.csv")
+        if 'Data' in dados.columns:
+            dados['Data'] = dados['Data'].apply(formatar_data_csv)
+        return dados
     except:
-        dados_diarias = pd.DataFrame(columns=[
+        return pd.DataFrame(columns=[
             'Termo', 'Instrumento', 'Numero_Termo', 'Funcionario', 'CPF', 'Cargo', 
-            'Qtd', 'Valor', 'Objetivo', 'Localidades', 'Periodo', 'Oficio', 'Data'
+            'Qtd', 'Qtd_Extenso', 'Valor', 'Valor_Extenso', 'Objetivo', 
+            'Localidades', 'Periodo', 'Oficio', 'Data'
         ])
-    
-    dados_apoio = pd.DataFrame({
-        'Numero_Termo': ['001/2024', '001/2024', '002/2024', '002/2024'],
-        'Termo': ['TERMO1', 'TERMO1', 'TERMO2', 'TERMO2'],
-        'Instrumento': ['INST 001/2024', 'INST 001/2024', 'INST 002/2024', 'INST 002/2024'],
-        'Funcionario': ['João Silva', 'Maria Santos', 'Pedro Oliveira', 'Ana Costa'],
-        'CPF': ['123.456.789-00', '987.654.321-00', '111.222.333-44', '555.666.777-88'],
-        'Cargo': ['Analista', 'Técnica', 'Coordenador', 'Assistente']
-    })
-    return dados_apoio, dados_diarias
 
 def salvar_dados(dados_diarias):
+    """Salva dados no CSV"""
     if 'Data' in dados_diarias.columns:
-        dados_diarias['Data'] = dados_diarias['Data'].apply(formatar_data)
+        dados_diarias['Data'] = dados_diarias['Data'].apply(formatar_data_csv)
     dados_diarias.to_csv("diarias_data.csv", index=False)
 
-dados_apoio, dados_diarias = carregar_dados()
+# ============================================================================
+# DADOS INICIAIS E CONFIGURAÇÕES
+# ============================================================================
+dados_diarias = carregar_dados()
 
-# Lista suspensa quantidade
+dados_apoio = pd.DataFrame({
+    'Numero_Termo': ['001/2024', '001/2024', '002/2024', '002/2024'],
+    'Termo': ['TERMO1', 'TERMO1', 'TERMO2', 'TERMO2'],
+    'Instrumento': ['INST 001/2024', 'INST 001/2024', 'INST 002/2024', 'INST 002/2024'],
+    'Funcionario': ['João Silva', 'Maria Santos', 'Pedro Oliveira', 'Ana Costa'],
+    'CPF': ['123.456.789-00', '987.654.321-00', '111.222.333-44', '555.666.777-88'],
+    'Cargo': ['Analista', 'Técnica', 'Coordenador', 'Assistente']
+})
+
 opcoes_quantidade = ['0,0', '0,5', '1,5', '2,5', '3,5', '4,5']
+termos_unicos = sorted(dados_apoio['Termo'].dropna().unique())
 
-# Sidebar
+# ============================================================================
+# INTERFACE - SIDEBAR
+# ============================================================================
 with st.sidebar:
     st.header("🔍 Filtros")
-    termos_unicos = sorted(dados_apoio['Termo'].dropna().unique())
-    termo_selecionado = st.selectbox("Termo:", [''] + termos_unicos)
+    termo_selecionado = st.selectbox("Termo:", [''] + list(termos_unicos))
     
     funcionarios = []
     if termo_selecionado:
@@ -69,70 +173,79 @@ with st.sidebar:
         funcionarios = sorted(dados_apoio.loc[mask, 'Funcionario'].dropna().unique())
     funcionario_selecionado = st.selectbox("Funcionário:", [''] + funcionarios)
 
-# Interface principal
+# ============================================================================
+# INTERFACE PRINCIPAL
+# ============================================================================
+st.title("📋 Pagamento de Diárias")
+st.markdown("---")
+
 col1, col2 = st.columns([2, 1])
 
+# ============================================================================
+# COLUNA 1 - NOVO REGISTRO
+# ============================================================================
 with col1:
     st.subheader("📝 Novo Registro")
     
+    # Dados do Termo
     st.markdown("**📋 Dados do Termo de Colaboração**")
-    termo_input = st.text_input("📄 **Termo de Colaboração**:")
+    termo_input = st.selectbox("📄 **Termo de Colaboração**:", 
+                              options=[''] + list(termos_unicos), index=0)
     
-    # Instrumento | Nº Termo lado a lado
-    col_instrumento_numero = st.columns([1, 1])
-    with col_instrumento_numero[0]:
-        instrumento = st.text_input("🎯 **Instrumento**:", key="instrumento")
-    with col_instrumento_numero[1]:
-        numero_termo = st.text_input("📍 **Nº Termo**:", key="numero_termo")
+    col_inst_num = st.columns([1, 1])
+    with col_inst_num[0]: instrumento = st.text_input("🎯 **Instrumento**:", key="instrumento")
+    with col_inst_num[1]: numero_termo = st.text_input("📍 **Nº Termo**:", key="numero_termo")
     
-    # Funcionário → CPF | Cargo lado a lado
+    if termo_input:
+        mask = dados_apoio['Termo'] == termo_input
+        if mask.any():
+            st.info(f"💡 Instrumento: {dados_apoio.loc[mask, 'Instrumento'].iloc[0]}")
+            st.info(f"💡 Nº Termo: {dados_apoio.loc[mask, 'Numero_Termo'].iloc[0]}")
+    
+    # Dados do Funcionário
     st.markdown("**👤 Dados do Funcionário**")
     funcionario_input = st.text_input("👤 **Funcionário**:", value=funcionario_selecionado)
     
     col_cpf_cargo = st.columns([1, 1])
-    with col_cpf_cargo[0]:
-        cpf = st.text_input("🆔 **CPF**:")
-    with col_cpf_cargo[1]:
-        cargo = st.text_input("💼 **Cargo**:")
+    with col_cpf_cargo[0]: cpf = st.text_input("🆔 **CPF**:")
+    with col_cpf_cargo[1]: cargo = st.text_input("💼 **Cargo**:")
     
-    # Auto-preenchimento
     if funcionario_selecionado:
-        mask_func = dados_apoio['Funcionario'] == funcionario_selecionado
-        if mask_func.any():
-            cpf_default = dados_apoio.loc[mask_func, 'CPF'].iloc[0]
-            cargo_default = dados_apoio.loc[mask_func, 'Cargo'].iloc[0]
-            st.info(f"💡 CPF: {cpf_default} | Cargo: {cargo_default}")
+        mask = dados_apoio['Funcionario'] == funcionario_selecionado
+        if mask.any():
+            st.info(f"💡 CPF: {dados_apoio.loc[mask, 'CPF'].iloc[0]} | Cargo: {dados_apoio.loc[mask, 'Cargo'].iloc[0]}")
     
-    # ✅ QUANTIDADE | VALOR NÃO EDITÁVEL | DATA LADO A LADO
+    # Valores e Data - Campos Alinhados
     st.markdown("**💰 Valores e Data**")
-    col_qtd_valor_data = st.columns([1, 1, 1])
     
-    with col_qtd_valor_data[0]:
-        qtd = st.selectbox("🔢 **Quantidade**:", 
-                          options=opcoes_quantidade, 
-                          index=2, 
-                          key="qtd_select")
+    # Títulos
+    col_qtd1, col_valor1, col_data1 = st.columns([1, 1, 1])
+    with col_qtd1: st.markdown("**🔢 Quantidade**")
+    with col_valor1: st.markdown("**💰 Valor**")
+    with col_data1: st.markdown("**📅 Data**")
     
-    with col_qtd_valor_data[1]:
-        # ✅ VALOR AUTOMÁTICO NÃO EDITÁVEL = Quantidade × 140
+    # Campos
+    col_qtd2, col_valor2, col_data2 = st.columns([1, 1, 1])
+    
+    with col_qtd2:
+        qtd = st.selectbox("", options=opcoes_quantidade, index=2, key="qtd_select")
+        st.markdown(f"*{quantidade_por_extenso(qtd)}*")  # ✅ CORRIGIDO
+    
+    with col_valor2:
         qtd_num = float(qtd.replace(',', '.'))
-        valor_auto = qtd_num * 140
-        valor_formatado = formatar_moeda(valor_auto)
-        
-        # ✅ TEXTBOX NÃO EDITÁVEL com disabled=True
-        st.text_input("💰 **Valor (R$)**:", 
-                     value=valor_formatado,
-                     disabled=True,
-                     help="Valor automático: Quantidade × R$ 140,00")
-        valor = valor_formatado  # Para salvar
+        valor = formatar_moeda(qtd_num * 140)
+        st.text_input("", value=valor, disabled=True, help="Quantidade × R$ 140,00")
+        st.markdown(f"*{valor_por_extenso(valor)}*")
     
-    with col_qtd_valor_data[2]:
-        data_input = st.text_input("📅 **Data (DD/MM/AAAA)**:", 
-                                  value=datetime.now().strftime("%d/%m/%Y"),
-                                  placeholder="14/02/2026")
+    with col_data2:
+        data_selecionada = st.date_input("", value=datetime.now().date(), 
+                                       label_visibility="collapsed", 
+                                       key="date_hidden",
+                                       format="DD/MM/YYYY")
+        st.markdown(f"**{formatar_data_completa(data_selecionada)}**")
+        data_input = formatar_data_csv(data_selecionada)
     
-    data_formatada = formatar_data(data_input)
-    
+    # Detalhes da Viagem
     st.markdown("**📋 Detalhes da Viagem**")
     objetivo = st.text_area("🎯 **Objetivo**:", height=50)
     localidades = st.text_area("📍 **Localidades**:", height=50)
@@ -141,19 +254,12 @@ with col1:
     
     if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True):
         novo_registro = pd.DataFrame([{
-            'Termo': termo_input,
-            'Instrumento': instrumento,
-            'Numero_Termo': numero_termo,
-            'Funcionario': funcionario_input,
-            'CPF': cpf,
-            'Cargo': cargo,
-            'Qtd': qtd,
-            'Valor': valor,  # ✅ Valor calculado automaticamente
-            'Objetivo': objetivo,
-            'Localidades': localidades,
-            'Periodo': periodo,
-            'Oficio': oficio,
-            'Data': data_formatada
+            'Termo': termo_input, 'Instrumento': instrumento, 'Numero_Termo': numero_termo,
+            'Funcionario': funcionario_input, 'CPF': cpf, 'Cargo': cargo,
+            'Qtd': qtd, 'Qtd_Extenso': quantidade_por_extenso(qtd),  # ✅ CORRIGIDO
+            'Valor': valor, 'Valor_Extenso': valor_por_extenso(valor),
+            'Objetivo': objetivo, 'Localidades': localidades,
+            'Periodo': periodo, 'Oficio': oficio, 'Data': data_input
         }])
         
         dados_diarias = pd.concat([dados_diarias, novo_registro], ignore_index=True)
@@ -161,6 +267,9 @@ with col1:
         st.success("✅ Registro salvo!")
         st.rerun()
 
+# ============================================================================
+# COLUNA 2 - AÇÕES E ESTATÍSTICAS
+# ============================================================================
 with col2:
     st.subheader("⚡ Ações")
     if st.button("🔄 Atualizar"): st.rerun()
@@ -169,49 +278,48 @@ with col2:
     st.markdown("---")
     st.subheader("📊 Estatísticas")
     if not dados_diarias.empty:
-        valores = [float(v.replace('R$', '').replace('.', '').replace(',', '.')) for v in dados_diarias['Valor'] if v]
+        valores = [float(v.replace('R$', '').replace('.', '').replace(',', '.')) 
+                  for v in dados_diarias['Valor'] if v]
         st.metric("Total Registros", len(dados_diarias))
         st.metric("Total Valor", formatar_moeda(sum(valores)))
 
-# Tabela
+# ============================================================================
+# TABELA DE REGISTROS
+# ============================================================================
 st.markdown("---")
 st.subheader("📋 Registros")
 
 if not dados_diarias.empty:
-    colunas_ordenadas = ['Termo', 'Instrumento', 'Numero_Termo', 'Funcionario', 'CPF', 'Cargo', 'Qtd', 'Valor', 'Data']
-    colunas_display = [col for col in colunas_ordenadas if col in dados_diarias.columns]
+    colunas_prioritarias = ['Termo', 'Funcionario', 'Qtd', 'Qtd_Extenso', 
+                           'Valor', 'Valor_Extenso', 'Data']
+    colunas_display = [col for col in colunas_prioritarias if col in dados_diarias.columns]
     
     df_display = dados_diarias[colunas_display].copy()
     if 'Data' in df_display.columns:
-        df_display['Data'] = df_display['Data'].apply(formatar_data)
+        df_display['Data'] = df_display['Data'].apply(formatar_data_csv)
     
-    edited_df = st.data_editor(
-        df_display,
-        num_rows="dynamic",
-        use_container_width=True
-    )
+    edited_df = st.data_editor(df_display, num_rows="dynamic", use_container_width=True)
     
-    col_actions1, col_actions2, col_actions3 = st.columns(3)
-    with col_actions1:
+    col1, col2, col3 = st.columns(3)
+    with col1:
         csv = io.BytesIO()
         edited_df.to_csv(csv, index=False)
         csv.seek(0)
         st.download_button("📥 Excel", csv, f"diarias_{datetime.now().strftime('%d%m%Y_%H%M')}.csv", "text/csv")
     
-    with col_actions2:
+    with col2:
         if st.button("💾 Salvar"):
             salvar_dados(edited_df)
             st.success("✅ Salvo!")
             st.rerun()
     
-    with col_actions3:
+    with col3:
         if st.button("🗑️ Limpar Tudo", type="secondary"):
             dados_diarias = pd.DataFrame(columns=dados_diarias.columns)
             salvar_dados(dados_diarias)
             st.rerun()
-
 else:
     st.info("👆 Cadastre o primeiro registro!")
 
 st.markdown("---")
-st.caption("✅ Valor AUTO NÃO EDITÁVEL: Quantidade × R$ 140")
+st.caption("✅ QUANTIDADE POR EXTENSO CORRIGIDA | Código reorganizado")
