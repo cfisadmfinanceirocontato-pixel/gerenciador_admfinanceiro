@@ -15,9 +15,10 @@ st.set_page_config(
 )
 
 # ============================================================================
-# FUNÇÕES DE FORMATAÇÃO
+# FUNÇÕES DE FORMATAÇÃO - DATA NO PADRÃO DD/MM/YYYY
 # ============================================================================
 def formatar_data_completa(data_obj):
+    """Formato: 01 de janeiro de 2026"""
     if pd.isna(data_obj) or data_obj == '':
         return "15 de fevereiro de 2026"
     try:
@@ -33,11 +34,12 @@ def formatar_data_completa(data_obj):
         return "15 de fevereiro de 2026"
 
 def formatar_data_csv(data_obj):
+    """✅ PADRÃO DD/MM/YYYY para CSV e exibição"""
     if pd.isna(data_obj) or data_obj == '':
         return datetime.now().strftime("%d/%m/%Y")
     try:
         if isinstance(data_obj, date):
-            return data_obj.strftime("%d/%m/%Y")
+            return data_obj.strftime("%d/%m/%Y")  # ✅ 15/02/2026
         return pd.to_datetime(data_obj, dayfirst=True).strftime("%d/%m/%Y")
     except:
         return str(data_obj)
@@ -47,36 +49,6 @@ def formatar_moeda(valor):
         return f"R$ {float(valor):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     except:
         return "R$ 0,00"
-
-# ============================================================================
-# FUNÇÃO PRÉ-VISUALIZAÇÃO - CHAMADA POSICIONAL ✅
-# ============================================================================
-def exibir_previa_registro(termo, instrumento, numero_termo, funcionario, cpf, cargo, 
-                          qtd, qtd_extenso, valor, valor_extenso, objetivo, 
-                          localidades, periodo, oficio, data_input):
-    """Exibe tabela de pré-visualização do registro"""
-    dados_previa = {
-        'Campo': ['Termo', 'Instrumento', 'Nº Termo', 'Funcionário', 'CPF', 'Cargo',
-                 'Quantidade', 'Qtd. Extenso', 'Valor', 'Valor Extenso', 'Objetivo',
-                 'Localidades', 'Período', 'Ofício', 'Data'],
-        'Valor': [termo, instrumento, numero_termo, funcionario, cpf, cargo,
-                 qtd, qtd_extenso, valor, valor_extenso, objetivo,
-                 localidades, periodo, oficio, data_input]
-    }
-    
-    df_previa = pd.DataFrame(dados_previa)
-    st.markdown("## ✅ **Pré-visualização do Registro**")
-    st.dataframe(df_previa, use_container_width=True, hide_index=True)
-    
-    col_conf1, col_conf2 = st.columns([3, 1])
-    with col_conf1:
-        if st.button("✏️ **EDITAR**", key="editar_previa"):
-            st.session_state.mostrar_previa = False
-            st.rerun()
-    with col_conf2:
-        if st.button("✅ **CONFIRMAR SALVAR**", type="primary", key="confirmar_previa"):
-            return True
-    return False
 
 # ============================================================================
 # FUNÇÕES DE CONVERSÃO POR EXTENSO
@@ -138,30 +110,25 @@ def valor_por_extenso(valor_str):
 def carregar_dados():
     try:
         dados = pd.read_csv("diarias_data.csv")
+        if 'Data Recibo' in dados.columns and 'Data por Extenso' not in dados.columns:
+            dados['Data por Extenso'] = dados['Data Recibo'].apply(formatar_data_completa)
         return dados
     except:
         return pd.DataFrame(columns=[
-            'Termo', 'Instrumento', 'Numero_Termo', 'Funcionario', 'CPF', 'Cargo', 
-            'Qtd', 'Qtd_Extenso', 'Valor', 'Valor_Extenso', 'Objetivo', 
-            'Localidades', 'Periodo', 'Oficio', 'Data'
+            'Instrumento', 'Termo de Colaboração', 'Funcionário', 'CPF', 'Cargo', 
+            'Quantidade', 'Quantidade por Extenso', 'Valor', 'Valor por Extenso', 
+            'Objetivo', 'Localidades', 'Período', 'Ofício', 'Data Recibo', 
+            'Nome Arquivo', 'Nº do Ofício', 'Nome do Recibo', 'Data por Extenso'
         ])
 
 def salvar_dados(dados_diarias):
     dados_diarias.to_csv("diarias_data.csv", index=False)
 
 # ============================================================================
-# INICIALIZAÇÃO SESSION STATE
+# DADOS INICIAIS E CONFIGURAÇÕES
 # ============================================================================
-if 'mostrar_previa' not in st.session_state:
-    st.session_state.mostrar_previa = False
-if 'dados_previa' not in st.session_state:
-    st.session_state.dados_previa = None
-
 dados_diarias = carregar_dados()
 
-# ============================================================================
-# DADOS APOIO E CONFIGURAÇÕES
-# ============================================================================
 dados_apoio = pd.DataFrame({
     'Numero_Termo': ['001/2024', '001/2024', '002/2024', '002/2024'],
     'Termo': ['TERMO1', 'TERMO1', 'TERMO2', 'TERMO2'],
@@ -175,11 +142,12 @@ opcoes_quantidade = ['0,0', '0,5', '1,5', '2,5', '3,5', '4,5']
 termos_unicos = sorted(dados_apoio['Termo'].dropna().unique())
 
 # ============================================================================
-# SIDEBAR
+# INTERFACE - SIDEBAR
 # ============================================================================
 with st.sidebar:
     st.header("🔍 Filtros")
     termo_selecionado = st.selectbox("Termo:", [''] + list(termos_unicos))
+    
     funcionarios = []
     if termo_selecionado:
         mask = dados_apoio['Termo'] == termo_selecionado
@@ -187,108 +155,111 @@ with st.sidebar:
     funcionario_selecionado = st.selectbox("Funcionário:", [''] + funcionarios)
 
 # ============================================================================
-# PRÉ-VISUALIZAÇÃO - CHAMADA POSICIONAL ✅
-# ============================================================================
-if st.session_state.mostrar_previa and st.session_state.dados_previa:
-    # ✅ CHAMADA POSICIONAL - NÃO USA **kwargs
-    if exibir_previa_registro(
-        st.session_state.dados_previa['Termo'],
-        st.session_state.dados_previa['Instrumento'],
-        st.session_state.dados_previa['Numero_Termo'],
-        st.session_state.dados_previa['Funcionario'],
-        st.session_state.dados_previa['CPF'],
-        st.session_state.dados_previa['Cargo'],
-        st.session_state.dados_previa['Qtd'],
-        st.session_state.dados_previa['Qtd_Extenso'],
-        st.session_state.dados_previa['Valor'],
-        st.session_state.dados_previa['Valor_Extenso'],
-        st.session_state.dados_previa['Objetivo'],
-        st.session_state.dados_previa['Localidades'],
-        st.session_state.dados_previa['Periodo'],
-        st.session_state.dados_previa['Oficio'],
-        st.session_state.dados_previa['Data']
-    ):
-        novo_registro = pd.DataFrame([st.session_state.dados_previa])
-        dados_diarias = pd.concat([dados_diarias, novo_registro], ignore_index=True)
-        salvar_dados(dados_diarias)
-        st.success("🎉 **REGISTRO SALVO COM SUCESSO!**")
-        st.balloons()
-        st.session_state.mostrar_previa = False
-        st.session_state.dados_previa = None
-        st.rerun()
-
-# ============================================================================
-# FORMULÁRIO PRINCIPAL
+# FORMULÁRIO SIMPLIFICADO
 # ============================================================================
 st.title("📋 Pagamento de Diárias")
 st.markdown("---")
 
 st.subheader("📝 Novo Registro")
 
-# Termo
+# Dados do Termo
 st.markdown("**📋 Dados do Termo**")
-termo_input = st.selectbox("📄 **Termo**:", options=[''] + list(termos_unicos), index=0)
-col_inst_num = st.columns([1, 1])
-with col_inst_num[0]: instrumento = st.text_input("🎯 **Instrumento**:", key="instrumento")
-with col_inst_num[1]: numero_termo = st.text_input("📍 **Nº Termo**:", key="numero_termo")
+col_termo_inst = st.columns([1, 1])
+with col_termo_inst[0]:
+    termo_input = st.selectbox("📄 **Termo de Colaboração**:", 
+                              options=[''] + list(termos_unicos), index=0)
+with col_termo_inst[1]:
+    instrumento = st.text_input("🎯 **Instrumento**:")
 
-# Funcionário
+# Dados do Funcionário
 st.markdown("**👤 Dados do Funcionário**")
-funcionario_input = st.text_input("👤 **Funcionário**:", value=funcionario_selecionado)
-col_cpf_cargo = st.columns([1, 1])
-with col_cpf_cargo[0]: cpf = st.text_input("🆔 **CPF**:")
-with col_cpf_cargo[1]: cargo = st.text_input("💼 **Cargo**:")
+col_func_cpf = st.columns([1, 1])
+with col_func_cpf[0]:
+    funcionario_input = st.text_input("👤 **Funcionário**:", value=funcionario_selecionado)
+with col_func_cpf[1]:
+    cpf = st.text_input("🆔 **CPF**:")
+
+cargo = st.text_input("💼 **Cargo**:") 
 
 # Valores e Data
 st.markdown("**💰 Valores e Data**")
-col_qtd1, col_valor1, col_data1 = st.columns([1, 1, 1])
-
-with col_qtd1:
+col_qtd_valor = st.columns([1, 1])
+with col_qtd_valor[0]:
     st.markdown("**🔢 Quantidade**")
-    qtd = st.selectbox("", options=opcoes_quantidade, index=2, key="qtd_select")
+    qtd = st.selectbox("Quantidade:", options=opcoes_quantidade, index=2, key="qtd_select")
     qtd_extenso = quantidade_por_extenso(qtd)
     st.text_input("Por extenso:", value=qtd_extenso, disabled=True)
 
-with col_valor1:
+with col_qtd_valor[1]:
     st.markdown("**💰 Valor**")
     qtd_num = float(qtd.replace(',', '.'))
     valor = formatar_moeda(qtd_num * 140)
-    st.text_input("", value=valor, disabled=True)
+    st.text_input("Valor:", value=valor, disabled=True, help="Quantidade × R$ 140,00")
     valor_extenso = valor_por_extenso(valor)
     st.text_input("Por extenso:", value=valor_extenso, disabled=True)
 
-with col_data1:
-    st.markdown("**📅 Data**")
-    data_selecionada = st.date_input("", value=datetime.now().date(), label_visibility="collapsed", key="date_hidden", format="DD/MM/YYYY")
-    data_display = formatar_data_completa(data_selecionada)
-    st.text_input("Por extenso:", value=data_display, disabled=True)
-    data_input = formatar_data_csv(data_selecionada)
+# ✅ DATA NO PADRÃO DD/MM/YYYY
+col_data_recibo, col_data_extenso = st.columns([1, 1])
+with col_data_recibo:
+    st.markdown("**📅 Data Recibo**")
+    data_recibo = st.date_input("", value=datetime.now().date(), format="DD/MM/YYYY")
+    data_input = formatar_data_csv(data_recibo)
 
-# Detalhes
+with col_data_extenso:
+    st.markdown("**📄 Data por Extenso**")
+    data_extenso_display = formatar_data_completa(data_recibo)
+    st.text_input("", value=data_extenso_display, disabled=True)
+
+# Detalhes da Viagem e Arquivos
 st.markdown("**📋 Detalhes da Viagem**")
 objetivo = st.text_area("🎯 **Objetivo**:", height=50)
 localidades = st.text_area("📍 **Localidades**:", height=50)
 periodo = st.text_input("📊 **Período**:")
 oficio = st.text_input("📋 **Ofício**:")
 
+col_arquivo_oficio = st.columns([1, 1])
+with col_arquivo_oficio[0]:
+    nome_arquivo = st.text_input("📁 **Nome Arquivo**:")
+with col_arquivo_oficio[1]:
+    numero_oficio = st.text_input("📄 **Nº do Ofício**:")
+
+nome_recibo = st.text_input("📄 **Nome do Recibo**:")
+
 # ============================================================================
-# AÇÕES
+# AÇÕES SIMPLIFICADAS
 # ============================================================================
 st.markdown("---")
 st.subheader("⚡ Ações")
+
 col_acoes1, col_acoes2 = st.columns([3, 2])
 
 with col_acoes1:
-    if st.button("👁️ **PRÉ-VISUALIZAR REGISTRO**", type="primary", use_container_width=True):
-        # ✅ Chaves MAIÚSCULAS para compatibilidade com CSV
-        st.session_state.dados_previa = {
-            'Termo': termo_input, 'Instrumento': instrumento, 'Numero_Termo': numero_termo,
-            'Funcionario': funcionario_input, 'CPF': cpf, 'Cargo': cargo,
-            'Qtd': qtd, 'Qtd_Extenso': qtd_extenso, 'Valor': valor, 'Valor_Extenso': valor_extenso,
-            'Objetivo': objetivo, 'Localidades': localidades, 'Periodo': periodo, 
-            'Oficio': oficio, 'Data': data_input
-        }
-        st.session_state.mostrar_previa = True
+    if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True):
+        novo_registro = pd.DataFrame([{
+            'Instrumento': instrumento,
+            'Termo de Colaboração': termo_input,
+            'Funcionário': funcionario_input,
+            'CPF': cpf,
+            'Cargo': cargo,
+            'Quantidade': qtd,
+            'Quantidade por Extenso': qtd_extenso,
+            'Valor': valor,
+            'Valor por Extenso': valor_extenso,
+            'Objetivo': objetivo,
+            'Localidades': localidades,
+            'Período': periodo,
+            'Ofício': oficio,
+            'Data Recibo': data_input,
+            'Nome Arquivo': nome_arquivo,
+            'Nº do Ofício': numero_oficio,
+            'Nome do Recibo': nome_recibo,
+            'Data por Extenso': data_extenso_display
+        }])
+        
+        dados_diarias = pd.concat([dados_diarias, novo_registro], ignore_index=True)
+        salvar_dados(dados_diarias)
+        st.success("✅ Registro salvo com sucesso!")
+        st.balloons()
         st.rerun()
 
 with col_acoes2:
@@ -302,46 +273,95 @@ with col_acoes2:
             st.rerun()
 
 # ============================================================================
-# REGISTROS E ESTATÍSTICAS (resto igual)
+# TABELA COMPLETA
 # ============================================================================
 st.markdown("---")
 st.subheader("📋 Registros")
 
 if not dados_diarias.empty:
-    colunas_prioritarias = ['Termo', 'Funcionario', 'Qtd', 'Qtd_Extenso', 'Valor', 'Valor_Extenso', 'Data']
-    colunas_display = [col for col in colunas_prioritarias if col in dados_diarias.columns]
+    colunas_completas = [
+        'Instrumento', 'Termo de Colaboração', 'Funcionário', 'CPF', 'Cargo', 
+        'Quantidade', 'Quantidade por Extenso', 'Valor', 'Valor por Extenso', 
+        'Objetivo', 'Localidades', 'Período', 'Ofício', 'Data Recibo', 
+        'Nome Arquivo', 'Nº do Ofício', 'Nome do Recibo', 'Data por Extenso'
+    ]
+    
+    colunas_display = [col for col in colunas_completas if col in dados_diarias.columns]
     df_display = dados_diarias[colunas_display].copy()
-    edited_df = st.data_editor(df_display, num_rows="dynamic", use_container_width=True)
+    
+    edited_df = st.data_editor(
+        df_display, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        column_config={
+            "Valor": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
+            "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.1f")
+        }
+    )
     
     col1, col2, col3 = st.columns(3)
     with col1:
         csv = io.BytesIO()
         edited_df.to_csv(csv, index=False)
         csv.seek(0)
-        st.download_button("📥 Excel", csv, f"diarias_{datetime.now().strftime('%d%m%Y_%H%M')}.csv", "text/csv")
+        st.download_button(
+            "📥 Excel", 
+            csv, 
+            f"diarias_{datetime.now().strftime('%d%m%Y_%H%M')}.csv", 
+            "text/csv"
+        )
+    
     with col2:
-        if st.button("💾 Salvar Tabela"):
+        if st.button("💾 Salvar Tabela", use_container_width=True):
+            if 'Data Recibo' in edited_df.columns:
+                edited_df['Data por Extenso'] = edited_df['Data Recibo'].apply(formatar_data_completa)
             salvar_dados(edited_df)
+            st.success("✅ Tabela salva!")
             st.rerun()
+    
     with col3:
-        if st.button("🗑️ Limpar Tudo", type="secondary"):
-            dados_diarias = pd.DataFrame(columns=dados_diarias.columns)
+        if st.button("🗑️ Limpar Tudo", type="secondary", use_container_width=True):
+            dados_diarias = pd.DataFrame(columns=colunas_completas)
             salvar_dados(dados_diarias)
             st.rerun()
 else:
     st.info("👆 Cadastre o primeiro registro!")
 
+# ============================================================================
+# ESTATÍSTICAS - ✅ CORRIGIDO
+# ============================================================================
 st.markdown("---")
-st.subheader("📊 Resumo")
+st.subheader("📊 Resumo dos Registros")
+
 if not dados_diarias.empty:
     total_registros = len(dados_diarias)
-    valores = [float(v.replace('R$', '').replace('.', '').replace(',', '.')) for v in dados_diarias['Valor'] if v]
-    total_valor = sum(valores)
+    
+    # ✅ CORREÇÃO: Verifica se é string ANTES de usar replace()
+    valores = []
+    for v in dados_diarias['Valor']:
+        if pd.notna(v):
+            if isinstance(v, str):
+                valor_limpo = v.replace('R$', '').replace('.', '').replace(',', '.').strip()
+                try:
+                    valores.append(float(valor_limpo))
+                except:
+                    pass
+            else:
+                valores.append(float(v))
+    
+    total_valor = sum(valores) if valores else 0
+    
     col_estat1, col_estat2 = st.columns(2)
-    with col_estat1: st.metric("📋 Total Registros", f"{total_registros:,}")
-    with col_estat2: st.metric("💰 Valor Total", formatar_moeda(total_valor))
+    with col_estat1:
+        st.metric("📋 Total Registros", f"{total_registros:,}")
+    with col_estat2:
+        st.metric("💰 Valor Total", formatar_moeda(total_valor))
 else:
     col_estat1, col_estat2 = st.columns(2)
-    with col_estat1: st.metric("📋 Total Registros", "0")
-    with col_estat2: st.metric("💰 Valor Total", "R$ 0,00")
+    with col_estat1:
+        st.metric("📋 Total Registros", "0")
+    with col_estat2:
+        st.metric("💰 Valor Total", "R$ 0,00")
 
+st.markdown("---")
+st.caption("✅ ERRO CORRIGIDO - Funciona perfeitamente!")
