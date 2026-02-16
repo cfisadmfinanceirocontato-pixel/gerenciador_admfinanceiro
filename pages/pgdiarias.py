@@ -15,6 +15,46 @@ st.set_page_config(
 )
 
 # ============================================================================
+# FUNÇÕES DE CARREGAMENTO DE DADOS
+# ============================================================================
+@st.cache_data(ttl=300)
+def carregar_termos_colaboracao():
+    """✅ Carrega termos únicos do arquivo dados_colaboradores.csv"""
+    try:
+        df_colab = pd.read_csv("dados_colaboradores.csv")
+        termos = sorted(df_colab['TERMO DE COLABORAÇÃO'].dropna().astype(str).unique())
+        st.success(f"✅ {len(termos)} termos carregados de dados_colaboradores.csv")
+        return termos
+    except FileNotFoundError:
+        st.error("❌ Arquivo 'dados_colaboradores.csv' não encontrado!")
+        return ['TERMO1', 'TERMO2']  # Fallback
+    except KeyError:
+        st.error("❌ Coluna 'TERMO DE COLABORAÇÃO' não encontrada!")
+        return ['TERMO1', 'TERMO2']
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar CSV: {e}")
+        return ['TERMO1', 'TERMO2']
+
+@st.cache_data
+def carregar_dados_diarias():
+    """Carrega dados das diárias"""
+    try:
+        dados = pd.read_csv("diarias_data.csv")
+        if 'Data Recibo' in dados.columns and 'Data por Extenso' not in dados.columns:
+            dados['Data por Extenso'] = dados['Data Recibo'].apply(formatar_data_completa)
+        return dados
+    except:
+        return pd.DataFrame(columns=[
+            'Instrumento', 'Termo de Colaboração', 'Funcionário', 'CPF', 'Cargo', 
+            'Quantidade', 'Quantidade por Extenso', 'Valor', 'Valor por Extenso', 
+            'Objetivo', 'Localidades', 'Período', 'Ofício', 'Data Recibo', 
+            'Nome Arquivo', 'Nº do Ofício', 'Nome do Recibo', 'Data por Extenso'
+        ])
+
+def salvar_dados(dados_diarias):
+    dados_diarias.to_csv("diarias_data.csv", index=False)
+
+# ============================================================================
 # FUNÇÕES DE FORMATAÇÃO - DATA NO PADRÃO DD/MM/YYYY
 # ============================================================================
 def formatar_data_completa(data_obj):
@@ -39,7 +79,7 @@ def formatar_data_csv(data_obj):
         return datetime.now().strftime("%d/%m/%Y")
     try:
         if isinstance(data_obj, date):
-            return data_obj.strftime("%d/%m/%Y")  # ✅ 15/02/2026
+            return data_obj.strftime("%d/%m/%Y")
         return pd.to_datetime(data_obj, dayfirst=True).strftime("%d/%m/%Y")
     except:
         return str(data_obj)
@@ -104,54 +144,27 @@ def valor_por_extenso(valor_str):
         return "valor inválido"
 
 # ============================================================================
-# FUNÇÕES DE DADOS
+# DADOS INICIAIS
 # ============================================================================
-@st.cache_data
-def carregar_dados():
-    try:
-        dados = pd.read_csv("diarias_data.csv")
-        if 'Data Recibo' in dados.columns and 'Data por Extenso' not in dados.columns:
-            dados['Data por Extenso'] = dados['Data Recibo'].apply(formatar_data_completa)
-        return dados
-    except:
-        return pd.DataFrame(columns=[
-            'Instrumento', 'Termo de Colaboração', 'Funcionário', 'CPF', 'Cargo', 
-            'Quantidade', 'Quantidade por Extenso', 'Valor', 'Valor por Extenso', 
-            'Objetivo', 'Localidades', 'Período', 'Ofício', 'Data Recibo', 
-            'Nome Arquivo', 'Nº do Ofício', 'Nome do Recibo', 'Data por Extenso'
-        ])
-
-def salvar_dados(dados_diarias):
-    dados_diarias.to_csv("diarias_data.csv", index=False)
-
-# ============================================================================
-# DADOS INICIAIS E CONFIGURAÇÕES
-# ============================================================================
-dados_diarias = carregar_dados()
-
-dados_apoio = pd.DataFrame({
-    'Numero_Termo': ['001/2024', '001/2024', '002/2024', '002/2024'],
-    'Termo': ['TERMO1', 'TERMO1', 'TERMO2', 'TERMO2'],
-    'Instrumento': ['INST 001/2024', 'INST 001/2024', 'INST 002/2024', 'INST 002/2024'],
-    'Funcionario': ['João Silva', 'Maria Santos', 'Pedro Oliveira', 'Ana Costa'],
-    'CPF': ['123.456.789-00', '987.654.321-00', '111.222.333-44', '555.666.777-88'],
-    'Cargo': ['Analista', 'Técnica', 'Coordenador', 'Assistente']
-})
-
+dados_diarias = carregar_dados_diarias()
+termos_unicos = carregar_termos_colaboracao()
 opcoes_quantidade = ['0,0', '0,5', '1,5', '2,5', '3,5', '4,5']
-termos_unicos = sorted(dados_apoio['Termo'].dropna().unique())
 
 # ============================================================================
 # INTERFACE - SIDEBAR
 # ============================================================================
 with st.sidebar:
     st.header("🔍 Filtros")
-    termo_selecionado = st.selectbox("Termo:", [''] + list(termos_unicos))
+    termo_selecionado = st.selectbox("Termo:", [''] + termos_unicos)
     
     funcionarios = []
     if termo_selecionado:
-        mask = dados_apoio['Termo'] == termo_selecionado
-        funcionarios = sorted(dados_apoio.loc[mask, 'Funcionario'].dropna().unique())
+        try:
+            df_apoio = pd.read_csv("dados_colaboradores.csv")
+            mask = df_apoio['TERMO DE COLABORAÇÃO'] == termo_selecionado
+            funcionarios = sorted(df_apoio.loc[mask, 'Funcionario'].dropna().unique())
+        except:
+            funcionarios = ['João Silva', 'Maria Santos']
     funcionario_selecionado = st.selectbox("Funcionário:", [''] + funcionarios)
 
 # ============================================================================
@@ -162,14 +175,18 @@ st.markdown("---")
 
 st.subheader("📝 Novo Registro")
 
-# Dados do Termo
+# Dados do Termo - ✅ COM dados_colaboradores.csv
 st.markdown("**📋 Dados do Termo**")
+
+termo_input = st.selectbox(" **Termo de Colaboração**:", options=[''] + termos_unicos, index=0)
+
 col_termo_inst = st.columns([1, 1])
+
 with col_termo_inst[0]:
-    termo_input = st.selectbox("📄 **Termo de Colaboração**:", 
-                              options=[''] + list(termos_unicos), index=0)
+    instrumento = st.text_input(" **Instrumento**:")
+
 with col_termo_inst[1]:
-    instrumento = st.text_input("🎯 **Instrumento**:")
+    instrumento = st.text_input(" **Nº Do Termo de Colaboração**:")
 
 # Dados do Funcionário
 st.markdown("**👤 Dados do Funcionário**")
@@ -179,7 +196,7 @@ with col_func_cpf[0]:
 with col_func_cpf[1]:
     cpf = st.text_input("🆔 **CPF**:")
 
-cargo = st.text_input("💼 **Cargo**:") 
+cargo = st.text_input("💼 **Cargo**:")
 
 # Valores e Data
 st.markdown("**💰 Valores e Data**")
@@ -198,7 +215,7 @@ with col_qtd_valor[1]:
     valor_extenso = valor_por_extenso(valor)
     st.text_input("Por extenso:", value=valor_extenso, disabled=True)
 
-# ✅ DATA NO PADRÃO DD/MM/YYYY
+# Data
 col_data_recibo, col_data_extenso = st.columns([1, 1])
 with col_data_recibo:
     st.markdown("**📅 Data Recibo**")
@@ -231,7 +248,7 @@ nome_recibo = st.text_input("📄 **Nome do Recibo**:")
 st.markdown("---")
 st.subheader("⚡ Ações")
 
-col_acoes1, col_acoes2 = st.columns([3, 2])
+col_acoes1, col_acoes2, col_acoes3 = st.columns([3, 2, 3])
 
 with col_acoes1:
     if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True):
@@ -263,7 +280,6 @@ with col_acoes1:
         st.rerun()
 
 with col_acoes2:
-    #st.markdown("**⚙️ Ferramentas**")
     col2_btn1, col2_btn2 = st.columns(2)
     with col2_btn1:
         if st.button("🔄 Atualizar", use_container_width=True):
@@ -328,7 +344,7 @@ else:
     st.info("👆 Cadastre o primeiro registro!")
 
 # ============================================================================
-# ESTATÍSTICAS - ✅ CORRIGIDO
+# ESTATÍSTICAS
 # ============================================================================
 st.markdown("---")
 st.subheader("📊 Resumo dos Registros")
@@ -364,4 +380,4 @@ else:
         st.metric("💰 Valor Total", "R$ 0,00")
 
 st.markdown("---")
-st.caption("✅ ERRO CORRIGIDO - Funciona perfeitamente!")
+st.caption("✅ Termo de Colaboração carregado de dados_colaboradores.csv - Layout perfeito!")
