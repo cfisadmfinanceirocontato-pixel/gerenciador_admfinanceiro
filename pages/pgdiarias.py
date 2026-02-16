@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, date
 import io
+import openpyxl
+from openpyxl.utils import get_column_letter
 
 # ============================================================================
 # CONFIGURAÇÃO DA APLICAÇÃO
@@ -15,91 +17,124 @@ st.set_page_config(
 )
 
 # ============================================================================
-# ✅ NOVA FUNÇÃO: SALVAR REGISTRO NA ORDEM EXATA SOLICITADA
+# ✅ SESSION STATE PARA CONTADOR NUMÉRICO
+# ============================================================================
+if 'contador_recibo' not in st.session_state:
+    st.session_state.contador_recibo = 1
+
+# ============================================================================
+# ✅ FUNÇÃO PRINCIPAL: SALVAR REGISTRO NA PLANILHA EXCEL
 # ============================================================================
 def salvar_registro_formulario():
-    """✅ Salva TODOS os dados do formulário nas 18 colunas EXATAS solicitadas"""
+    """✅ Nome do Recibo: NomeArquivo_NºOfício_Contador"""
     
-    # ✅ COLETA TODOS OS DADOS NA ORDEM EXATA
-    dados_registro = {
-        'Termo de Colaboração': termo_input,
-        'Instrumento': instrumento,
-        'Nº Do Termo de Colaboração': numero_termo,
-        'Funcionário': funcionario_input,
-        'CPF': cpf,
-        'Cargo': cargo,
-        'Quantidade': qtd,
-        'Quantidade por extenso': qtd_extenso,
-        'Por extenso': valor_extenso,  # Valor por extenso (campo "Por extenso")
-        'Data Recibo': data_input,
-        'Data por Extenso': data_extenso_display,
-        'Objetivo': objetivo,
-        'Localidades': localidades,
-        'Período': periodo,
-        'Ofício': oficio,
-        'Nome Arquivo': nome_arquivo,
-        'Nº do Ofício': numero_oficio_input,
-        'Nome do Recibo': nome_recibo
-    }
-    
-    # ✅ 18 COLUNAS NA ORDEM EXATA SOLICITADA
+    # ✅ 19 COLUNAS NA ORDEM EXATA
     colunas_planilha = [
         'Termo de Colaboração', 'Instrumento', 'Nº Do Termo de Colaboração', 
         'Funcionário', 'CPF', 'Cargo', 'Quantidade', 'Quantidade por extenso', 
-        'Por extenso', 'Data Recibo', 'Data por Extenso', 'Objetivo', 
-        'Localidades', 'Período', 'Ofício', 'Nome Arquivo', 'Nº do Ofício', 
-        'Nome do Recibo'
+        'Valor', 'Valor por extenso', 'Data Recibo', 'Data por Extenso', 
+        'Objetivo', 'Localidades', 'Período', 'Ofício', 'Nome Arquivo', 
+        'Nº do Ofício', 'Nome do Recibo'
     ]
+    
+    # ✅ NOME DO RECIBO: NomeArquivo_NºOfício_1, NomeArquivo_NºOfício_2, etc.
+    nome_recibo_completo = f"{nome_arquivo}_{numero_oficio_input}_{st.session_state.contador_recibo}"
+    
+    dados_registro = {
+        'Termo de Colaboração': termo_input or '',
+        'Instrumento': instrumento or '',
+        'Nº Do Termo de Colaboração': numero_termo or '',
+        'Funcionário': funcionario_input or '',
+        'CPF': cpf or '',
+        'Cargo': cargo or '',
+        'Quantidade': qtd or '',
+        'Quantidade por extenso': qtd_extenso or '',
+        'Valor': valor or '',
+        'Valor por extenso': valor_extenso or '',
+        'Data Recibo': data_input or '',
+        'Data por Extenso': data_extenso_display or '',
+        'Objetivo': objetivo or '',
+        'Localidades': localidades or '',
+        'Período': periodo or '',
+        'Ofício': oficio or '',
+        'Nome Arquivo': nome_arquivo or '',
+        'Nº do Ofício': numero_oficio_input or '',
+        'Nome do Recibo': nome_recibo_completo  # ✅ FORMATO FINAL
+    }
+    
+    # ✅ VALIDAÇÃO
+    if not termo_input or not funcionario_input or not cpf:
+        st.error("❌ **Preencha obrigatoriamente**: Termo, Funcionário e CPF!")
+        return None, None
     
     novo_registro = pd.DataFrame([dados_registro])[colunas_planilha]
     
-    # ✅ CARREGA OU CRIA A PLANILHA PRINCIPAL
+    # ✅ CARREGA OU CRIA PLANILHA
     try:
-        dados_existentes = pd.read_csv("registros_completos.csv")
+        dados_existentes = pd.read_excel("registros_completos.xlsx")
         dados_atualizados = pd.concat([dados_existentes, novo_registro], ignore_index=True)
-    except:
+    except FileNotFoundError:
         dados_atualizados = novo_registro
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar: {e}")
+        return None, None
     
-    # ✅ SALVA NA PLANILHA
-    dados_atualizados.to_csv("registros_completos.csv", index=False)
-    return dados_atualizados, novo_registro
+    # ✅ SALVA COM FORMATAÇÃO
+    try:
+        with pd.ExcelWriter("registros_completos.xlsx", engine='openpyxl') as writer:
+            dados_atualizados.to_excel(writer, sheet_name='Registros', index=False)
+            workbook = writer.book
+            worksheet = writer.sheets['Registros']
+            
+            # Auto-ajuste colunas
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = get_column_letter(column[0].column)
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            # Cabeçalho negrito
+            for cell in worksheet[1]:
+                cell.font = openpyxl.styles.Font(bold=True)
+        
+        return dados_atualizados, novo_registro, nome_recibo_completo
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar: {e}")
+        return None, None, None
 
 # ============================================================================
-# FUNÇÕES EXISTENTES (mantidas)
+# FUNÇÃO INCREMENTAR CONTADOR
+# ============================================================================
+def incrementar_contador():
+    """➕ Incrementa contador +1"""
+    st.session_state.contador_recibo += 1
+
+# ============================================================================
+# FUNÇÕES AUXILIARES
 # ============================================================================
 def extrair_numero_oficio(oficio_completo):
-    """✅ Extrai apenas caracteres ANTES da primeira '/' do ofício"""
     if pd.isna(oficio_completo) or not isinstance(oficio_completo, str) or '/' not in oficio_completo:
         return str(oficio_completo).strip()
     return oficio_completo.split('/')[0].strip()
 
-def gerar_nome_recibo(nome_arquivo, numero_oficio):
-    """✅ Concatena 'NomeArquivo_NºOfício' para Nome do Recibo"""
-    if nome_arquivo and numero_oficio:
-        return f"{nome_arquivo}_{numero_oficio}".strip()
-    return ""
-
 @st.cache_data(ttl=300)
 def carregar_termos_colaboracao():
-    """✅ Carrega termos únicos do arquivo dados_colaboradores.csv"""
     try:
         df_colab = pd.read_csv("dados_colaboradores.csv")
         termos = sorted(df_colab['TERMO DE COLABORAÇÃO'].dropna().astype(str).unique())
-        st.success(f"✅ {len(termos)} termos carregados de dados_colaboradores.csv")
         return termos
-    except FileNotFoundError:
-        st.error("❌ Arquivo 'dados_colaboradores.csv' não encontrado!")
-        return ['TERMO1', 'TERMO2']
-    except KeyError:
-        st.error("❌ Coluna 'TERMO DE COLABORAÇÃO' não encontrada!")
-        return ['TERMO1', 'TERMO2']
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar CSV: {e}")
+    except:
         return ['TERMO1', 'TERMO2']
 
 @st.cache_data(ttl=300)
 def buscar_instrumento_por_termo(termo):
-    """🔍 Busca instrumento na 3ª coluna do CSV pelo termo selecionado"""
     try:
         df_colab = pd.read_csv("dados_colaboradores.csv")
         if len(df_colab.columns) > 2:
@@ -116,41 +151,35 @@ def buscar_instrumento_por_termo(termo):
 
 @st.cache_data(ttl=300)
 def buscar_numero_termo_por_nome(termo):
-    """🔍 Busca Nº do termo na 2ª coluna (índice 1) do CSV"""
     try:
         df_colab = pd.read_csv("dados_colaboradores.csv")
         if len(df_colab.columns) > 1:
             coluna_numero = df_colab.columns[1]
             mask = df_colab['TERMO DE COLABORAÇÃO'] == termo
             if mask.any():
-                numero_encontrado = df_colab.loc[mask, coluna_numero].iloc[0]
-                return str(numero_encontrado).strip()
+                return str(df_colab.loc[mask, coluna_numero].iloc[0]).strip()
         return ""
     except:
         return ""
 
 @st.cache_data(ttl=300)
 def carregar_funcionarios_por_termo(termo):
-    """🔍 Carrega funcionários da OITAVA COLUNA (índice 7) do termo selecionado"""
     try:
         df_colab = pd.read_csv("dados_colaboradores.csv")
         if len(df_colab.columns) > 6:
             coluna_oitava = df_colab.columns[6]
             mask = df_colab['TERMO DE COLABORAÇÃO'] == termo
             if mask.any():
-                funcionarios = sorted(df_colab.loc[mask, coluna_oitava].dropna().astype(str).unique())
-                return funcionarios
+                return sorted(df_colab.loc[mask, coluna_oitava].dropna().astype(str).unique())
         return []
     except:
         return []
 
 @st.cache_data(ttl=300)
 def buscar_cpf_cargo_por_funcionario(termo, funcionario):
-    """🔍 Busca CPF e Cargo pelo termo + funcionário da 8ª coluna"""
     try:
         df_colab = pd.read_csv("dados_colaboradores.csv")
         coluna_oitava = df_colab.columns[6] if len(df_colab.columns) > 6 else None
-        
         if coluna_oitava:
             mask = (df_colab['TERMO DE COLABORAÇÃO'] == termo) & (df_colab[coluna_oitava] == funcionario)
             if mask.any():
@@ -163,7 +192,6 @@ def buscar_cpf_cargo_por_funcionario(termo, funcionario):
         return "", ""
 
 def formatar_data_completa(data_obj):
-    """Formato: 01 de janeiro de 2026"""
     if pd.isna(data_obj) or data_obj == '':
         return "16 de fevereiro de 2026"
     try:
@@ -179,7 +207,6 @@ def formatar_data_completa(data_obj):
         return "16 de fevereiro de 2026"
 
 def formatar_data_csv(data_obj):
-    """✅ PADRÃO DD/MM/YYYY para CSV e exibição"""
     if pd.isna(data_obj) or data_obj == '':
         return datetime.now().strftime("%d/%m/%Y")
     try:
@@ -257,6 +284,10 @@ opcoes_quantidade = ['0,0', '0,5', '1,5', '2,5', '3,5', '4,5']
 with st.sidebar:
     st.header("🔍 Filtros")
     termo_filtro = st.selectbox("Filtrar por Termo:", ['Todos'] + termos_unicos)
+    
+    st.markdown("---")
+    st.subheader("📄 **Contador Recibo**")
+    st.metric("Próximo Nº", st.session_state.contador_recibo)
 
 # ============================================================================
 # FORMULÁRIO PRINCIPAL
@@ -266,10 +297,9 @@ st.markdown("---")
 
 st.subheader("📝 Novo Registro")
 
-# ✅ DADOS DO TERMO
+# Dados do Termo
 st.markdown("**📋 Dados do Termo**")
 termo_input = st.selectbox(" **Termo de Colaboração**:", options=[''] + termos_unicos, index=0)
-
 instrumento_auto = buscar_instrumento_por_termo(termo_input) if termo_input else ""
 numero_termo_auto = buscar_numero_termo_por_nome(termo_input) if termo_input else ""
 
@@ -279,14 +309,10 @@ with col_termo_inst[0]:
 with col_termo_inst[1]:
     numero_termo = st.text_input(" **Nº Do Termo de Colaboração**:", value=numero_termo_auto)
 
-# ✅ DADOS DO FUNCIONÁRIO
+# Dados do Funcionário
 st.markdown("**👤 Dados do Funcionário**")
 funcionarios_do_termo = carregar_funcionarios_por_termo(termo_input)
-funcionario_input = st.selectbox(
-    "👤 **Funcionário**", 
-    options=[''] + funcionarios_do_termo, 
-    index=0
-)
+funcionario_input = st.selectbox("👤 **Funcionário**", options=[''] + funcionarios_do_termo, index=0)
 
 cpf_auto, cargo_auto = "", ""
 if termo_input and funcionario_input:
@@ -349,12 +375,14 @@ with col_periodo_oficio_arquivo[3]:
     numero_oficio_auto = extrair_numero_oficio(oficio)
     numero_oficio_input = st.text_input("📄 **Nº do Ofício**:", value=numero_oficio_auto)
 
+# ✅ NOME DO RECIBO: NomeArquivo_NºOfício_Contador
+nome_recibo_auto = f"{nome_arquivo}_{numero_oficio_input}_{st.session_state.contador_recibo}" if nome_arquivo and numero_oficio_input else ""
+
 with col_periodo_oficio_arquivo[4]:
-    nome_recibo_auto = gerar_nome_recibo(nome_arquivo, numero_oficio_auto)
     nome_recibo = st.text_input("📄 **Nome do Recibo**:", value=nome_recibo_auto)
 
 # ============================================================================
-# ✅ BOTÃO SALVAR COM NOVA FUNÇÃO
+# BOTÕES DE AÇÃO
 # ============================================================================
 st.markdown("---")
 st.subheader("⚡ Ações")
@@ -363,20 +391,19 @@ col_acoes1, col_acoes2, col_acoes3 = st.columns([3, 2, 3])
 
 with col_acoes1:
     if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True):
-        try:
-            dados_planilha, registro_salvo = salvar_registro_formulario()
-            
-            st.success(f"✅ Registro salvo com sucesso!")
-            st.success(f"📊 Nome Recibo: **{registro_salvo['Nome do Recibo'].iloc[0]}**")
+        resultado = salvar_registro_formulario()
+        if resultado[0] is not None:
+            st.success(f"✅ **REGISTRO SALVO!**")
+            st.success(f"📄 **Nome do Recibo**: {resultado[2]}")
+            st.success(f"🔢 **Próximo**: {nome_arquivo}_{numero_oficio_input}_{st.session_state.contador_recibo + 1}")
             st.balloons()
             st.rerun()
-        except Exception as e:
-            st.error(f"❌ Erro ao salvar: {str(e)}")
 
 with col_acoes2:
     col2_btn1, col2_btn2 = st.columns(2)
     with col2_btn1:
-        if st.button("🔄 Atualizar", use_container_width=True):
+        if st.button("🔄 **ATUALIZAR** ➕", use_container_width=True, on_click=incrementar_contador):
+            st.success(f"✅ **Contador atualizado**: {st.session_state.contador_recibo}")
             st.rerun()
     with col2_btn2:
         if st.button("🗑️ Limpar", use_container_width=True):
@@ -386,47 +413,53 @@ with col_acoes2:
 # TABELA DE REGISTROS
 # ============================================================================
 st.markdown("---")
-st.subheader("📋 Registros")
+st.subheader("📋 Registros Salvos")
 
 try:
-    dados_completos = pd.read_csv("registros_completos.csv")
+    dados_completos = pd.read_excel("registros_completos.xlsx")
     if not dados_completos.empty:
         st.dataframe(dados_completos, use_container_width=True)
         
         col1, col2 = st.columns(2)
         with col1:
-            csv = io.BytesIO()
-            dados_completos.to_csv(csv, index=False)
-            csv.seek(0)
+            buffer_excel = io.BytesIO()
+            with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                dados_completos.to_excel(writer, sheet_name='Registros', index=False)
+            buffer_excel.seek(0)
             st.download_button(
-                "📥 Download CSV", 
-                csv, 
-                f"registros_completos_{datetime.now().strftime('%d%m%Y_%H%M')}.csv", 
-                "text/csv"
+                "📥 **Download Excel**", 
+                buffer_excel.getvalue(), 
+                f"registros_completos_{datetime.now().strftime('%d%m%Y_%H%M')}.xlsx", 
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
             )
         with col2:
-            if st.button("🗑️ Limpar Tudo", type="secondary", use_container_width=True):
-                pd.DataFrame(columns=dados_completos.columns).to_csv("registros_completos.csv", index=False)
+            if st.button("🗑️ **Limpar Tudo**", type="secondary", use_container_width=True):
+                colunas_vazias = pd.DataFrame(columns=dados_completos.columns)
+                colunas_vazias.to_excel("registros_completos.xlsx", index=False)
                 st.rerun()
     else:
-        st.info("👆 Cadastre o primeiro registro!")
-except:
-    st.info("👆 Cadastre o primeiro registro na planilha!")
+        st.info("👆 **Cadastre o primeiro registro!**")
+except FileNotFoundError:
+    st.info("👆 **Cadastre o primeiro registro!**")
+except Exception as e:
+    st.error(f"❌ Erro: {e}")
 
 # ============================================================================
 # ESTATÍSTICAS
 # ============================================================================
 st.markdown("---")
 st.subheader("📊 Resumo")
-
 try:
-    dados_completos = pd.read_csv("registros_completos.csv")
+    dados_completos = pd.read_excel("registros_completos.xlsx")
     total_registros = len(dados_completos)
-    
     st.metric("📋 Total Registros", f"{total_registros:,}")
     
+    if total_registros > 0:
+        valores_limpos = dados_completos['Valor'].str.replace('R$', '').str.replace('.', '').str.replace(',', '.').astype(float)
+        st.metric("💰 Total Valor", f"R$ {valores_limpos.sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
 except:
     st.metric("📋 Total Registros", "0")
 
 st.markdown("---")
-st.caption("✅ Planilha salva em: **registros_completos.csv** | 18 colunas na ordem exata!")
+st.caption("✅ **Formato Nome Recibo**: `NomeArquivo_NºOfício_1` ➕ `NomeArquivo_NºOfício_2` ➕ etc.")
