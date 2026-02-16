@@ -35,6 +35,40 @@ def carregar_termos_colaboracao():
         st.error(f"❌ Erro ao carregar CSV: {e}")
         return ['TERMO1', 'TERMO2']
 
+# ✅ FUNÇÃO: Busca instrumento vinculado ao termo (3ª coluna)
+@st.cache_data(ttl=300)
+def buscar_instrumento_por_termo(termo):
+    """🔍 Busca instrumento na 3ª coluna do CSV pelo termo selecionado"""
+    try:
+        df_colab = pd.read_csv("dados_colaboradores.csv")
+        if len(df_colab.columns) > 2:
+            coluna_termo = df_colab.columns[2]  # 3ª coluna
+            mask = df_colab[coluna_termo] == termo
+            if mask.any():
+                cols_instrumento = ['Instrumento', 'INSTRUMENTO', df_colab.columns[0]]
+                for col in cols_instrumento:
+                    if col in df_colab.columns:
+                        return df_colab.loc[mask, col].iloc[0]
+        return ""
+    except:
+        return ""
+
+# ✅ NOVA FUNÇÃO: Busca NÚMERO do termo na 2ª coluna
+@st.cache_data(ttl=300)
+def buscar_numero_termo_por_nome(termo):
+    """🔍 Busca Nº do termo na 2ª coluna (índice 1) do CSV"""
+    try:
+        df_colab = pd.read_csv("dados_colaboradores.csv")
+        if len(df_colab.columns) > 1:
+            coluna_numero = df_colab.columns[1]  # 2ª coluna (índice 1)
+            mask = df_colab['TERMO DE COLABORAÇÃO'] == termo
+            if mask.any():
+                numero_encontrado = df_colab.loc[mask, coluna_numero].iloc[0]
+                return str(numero_encontrado).strip()
+        return ""
+    except:
+        return ""
+
 @st.cache_data
 def carregar_dados_diarias():
     """Carrega dados das diárias"""
@@ -48,7 +82,8 @@ def carregar_dados_diarias():
             'Instrumento', 'Termo de Colaboração', 'Funcionário', 'CPF', 'Cargo', 
             'Quantidade', 'Quantidade por Extenso', 'Valor', 'Valor por Extenso', 
             'Objetivo', 'Localidades', 'Período', 'Ofício', 'Data Recibo', 
-            'Nome Arquivo', 'Nº do Ofício', 'Nome do Recibo', 'Data por Extenso'
+            'Nome Arquivo', 'Nº do Ofício', 'Nome do Recibo', 'Data por Extenso',
+            'Nº Do Termo de Colaboração'  # ✅ Campo adicionado
         ])
 
 def salvar_dados(dados_diarias):
@@ -168,25 +203,42 @@ with st.sidebar:
     funcionario_selecionado = st.selectbox("Funcionário:", [''] + funcionarios)
 
 # ============================================================================
-# FORMULÁRIO SIMPLIFICADO
+# FORMULÁRIO SIMPLIFICADO - ✅ COM VINCULAÇÃO COMPLETA
 # ============================================================================
 st.title("📋 Pagamento de Diárias")
 st.markdown("---")
 
 st.subheader("📝 Novo Registro")
 
-# Dados do Termo - ✅ COM dados_colaboradores.csv
+# ✅ DADOS DO TERMO - COM VINCULAÇÃO AUTOMÁTICA DE INSTRUMENTO E NÚMERO
 st.markdown("**📋 Dados do Termo**")
 
 termo_input = st.selectbox(" **Termo de Colaboração**:", options=[''] + termos_unicos, index=0)
 
+# Busca automática do INSTRUMENTO (3ª coluna) e NÚMERO (2ª coluna)
+instrumento_auto = buscar_instrumento_por_termo(termo_input) if termo_input else ""
+numero_termo_auto = buscar_numero_termo_por_nome(termo_input) if termo_input else ""
+
 col_termo_inst = st.columns([1, 1])
 
 with col_termo_inst[0]:
-    instrumento = st.text_input(" **Instrumento**:")
+    instrumento = st.text_input(" **Instrumento**:", 
+                               value=instrumento_auto, 
+                               help="Auto-preenchido pela 3ª coluna do dados_colaboradores.csv")
 
 with col_termo_inst[1]:
-    instrumento = st.text_input(" **Nº Do Termo de Colaboração**:")
+    numero_termo = st.text_input(" **Nº Do Termo de Colaboração**:", 
+                                value=numero_termo_auto,
+                                help="Auto-preenchido pela 2ª coluna do dados_colaboradores.csv")
+
+# Validação visual dos campos automáticos
+if termo_input:
+    if not instrumento_auto:
+        st.warning("⚠️ Instrumento não encontrado para este termo")
+    if not numero_termo_auto:
+        st.warning("⚠️ Número do termo não encontrado na 2ª coluna")
+    else:
+        st.success(f"✅ Nº do Termo: {numero_termo_auto}")
 
 # Dados do Funcionário
 st.markdown("**👤 Dados do Funcionário**")
@@ -270,7 +322,8 @@ with col_acoes1:
             'Nome Arquivo': nome_arquivo,
             'Nº do Ofício': numero_oficio,
             'Nome do Recibo': nome_recibo,
-            'Data por Extenso': data_extenso_display
+            'Data por Extenso': data_extenso_display,
+            'Nº Do Termo de Colaboração': numero_termo  # ✅ Campo adicionado
         }])
         
         dados_diarias = pd.concat([dados_diarias, novo_registro], ignore_index=True)
@@ -296,7 +349,8 @@ st.subheader("📋 Registros")
 
 if not dados_diarias.empty:
     colunas_completas = [
-        'Instrumento', 'Termo de Colaboração', 'Funcionário', 'CPF', 'Cargo', 
+        'Instrumento', 'Termo de Colaboração', 'Nº Do Termo de Colaboração',  # ✅ Ordem ajustada
+        'Funcionário', 'CPF', 'Cargo', 
         'Quantidade', 'Quantidade por Extenso', 'Valor', 'Valor por Extenso', 
         'Objetivo', 'Localidades', 'Período', 'Ofício', 'Data Recibo', 
         'Nome Arquivo', 'Nº do Ofício', 'Nome do Recibo', 'Data por Extenso'
@@ -380,4 +434,4 @@ else:
         st.metric("💰 Valor Total", "R$ 0,00")
 
 st.markdown("---")
-st.caption("✅ Termo de Colaboração carregado de dados_colaboradores.csv - Layout perfeito!")
+st.caption("✅ INSTRUMENTO e Nº DO TERMO VINCULADOS AUTOMATICAMENTE ao dados_colaboradores.csv!")
