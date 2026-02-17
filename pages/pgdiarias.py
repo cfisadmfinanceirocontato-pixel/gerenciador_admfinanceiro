@@ -34,7 +34,7 @@ def is_deployed():
 def get_output_path():
     """📁 Retorna pasta Desktop (local) ou temp (deploy)"""
     if is_deployed():
-        return Path(tempfile.gettempdir()) / "Pagto_Diarias"
+        return Path.home() / "Desktop" / "Pagto_Diarias"
     return Path.home() / "Desktop" / "Pagto_Diarias"
 
 # ============================================================================
