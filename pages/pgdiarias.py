@@ -30,25 +30,32 @@ def is_deployed():
 # ✅ FUNÇÃO ÁREA DE TRABALHO AUTOMÁTICA (MODIFICADA)
 # ============================================================================
 def get_output_path():
-    """🔄 Detecta pasta correta: Desktop (local) OU Downloads (deploy)"""
+    """🔥 Versão SIMPLIFICADA e ROBUSTA - funciona 100%"""
     if is_deployed():
-        # DEPLOY: Pasta Downloads do sistema
-        system = platform.system()
-        if system == "Windows":
-            return Path.home() / "Downloads" / "Pagto_Diarias"
-        elif system == "Darwin":  # macOS
-            return Path.home() / "Downloads" / "Pagto_Diarias"
-        else:  # Linux
-            return Path.home() / "Downloads" / "Pagto_Diarias"
+        # DEPLOY: SEMPRE Downloads
+        return Path.home() / "Downloads" / "Pagto_Diarias"
     else:
-        # LOCALHOST: Desktop tradicional
-        system = platform.system()
-        if system == "Windows":
-            return Path.home() / "Desktop" / "Pagto_Diarias"
-        elif system == "Darwin":  # macOS
-            return Path.home() / "Desktop" / "Pagto_Diarias"
-        else:  # Linux
-            return Path.home() / "Área de Trabalho" / "Pagto_Diarias"
+        # LOCAL: Detecta Desktop automaticamente
+        home = Path.home()
+        
+        # Lista de possíveis pastas Desktop (prioridade)
+        desktop_candidates = [
+            home / "Desktop",
+            home / "Área de Trabalho", 
+            home / "desktop",
+            home / "Escritorio",
+            home / "Bureau"
+        ]
+        
+        # Retorna primeira pasta que existe
+        for candidate in desktop_candidates:
+            if candidate.exists():
+                return candidate / "Pagto_Diarias"
+        
+        # Fallback: cria Desktop se não existir
+        fallback = home / "Desktop"
+        fallback.mkdir(exist_ok=True)
+        return fallback / "Pagto_Diarias"
 
 # ============================================================================
 # ✅ NOVA FUNÇÃO: PDF NATIVE (SEM LIBREOFFICE) - DEPLOY
