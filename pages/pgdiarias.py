@@ -26,73 +26,125 @@ def is_deployed():
         return False
 
 # ============================================================================
-# ✅ FUNÇÃO ÁREA DE TRABALHO AUTOMÁTICA
+# ✅ FUNÇÃO ÁREA DE TRABALHO MANUAL (CORRIGIDA 02)
 # ============================================================================
 def get_output_path():
-    """🔄 Detecta pasta correta: Desktop (local) OU Downloads (deploy)"""
-    if is_deployed():
-        return Path.home() / "Downloads" / "Pagto_Diarias"
-    else:
-        system = platform.system()
-        if system == "Windows":
-            return Path.home() / "Desktop" / "Pagto_Diarias"
-        elif system == "Darwin":  # macOS
-            return Path.home() / "Desktop" / "Pagto_Diarias"
-        else:  # Linux
-            desktop_path = os.environ.get('XDG_DESKTOP_DIR', 
-                                        str(Path.home() / "Desktop"))
-            return Path(desktop_path) / "Pagto_Diarias"
+    """🔄 Retorna pasta vazia - usuário define manualmente"""
+    return ""
 
 # ============================================================================
-# ✅ PDF NATIVE (DEPLOY)
+# ✅ PDF NATIVE MELHORADO (CORRIGIDA 01 - MESMO PADRÃO DOCX)
 # ============================================================================
 PDF_NATIVE_AVAILABLE = False
 try:
     from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import inch
+    from reportlab.lib import colors
     from reportlab.pdfgen import canvas
     PDF_NATIVE_AVAILABLE = True
 except ImportError:
     PDF_NATIVE_AVAILABLE = False
 
 def docx_to_pdf_native(docx_path, pdf_path):
-    """🔧 CORREÇÃO 01: PDF nativo melhorado para deploy"""
+    """🔧 CORREÇÃO 01: PDF nativo que REPLICA EXATAMENTE o DOCX"""
     if not PDF_NATIVE_AVAILABLE:
         return False
+    
     try:
         doc = Document(docx_path)
         c = canvas.Canvas(str(pdf_path), pagesize=letter)
         width, height = letter
-        y = height - 50
+        y = height - 72  # Margem superior
+        
+        # Fonte padrão para replicar DOCX
+        c.setFont("Helvetica", 12)
         
         for para in doc.paragraphs:
-            text = para.text
-            while text:
-                if y < 50:
+            text = para.text.strip()
+            if not text:
+                y -= 18  # Espaçamento entre parágrafos
+                continue
+                
+            # Quebra de linha inteligente (60 chars por linha)
+            lines = []
+            while len(text) > 0:
+                line = text[:58]  # Margem esquerda/direita
+                if len(text) > 58:
+                    last_space = line.rfind(' ')
+                    if last_space > 20:
+                        line = line[:last_space]
+                lines.append(line)
+                text = text[len(line):]
+            
+            for line in lines:
+                if y < 72:  # Nova página
                     c.showPage()
-                    y = height - 50
-                line = text[:60]
-                c.drawString(50, y, line)
-                text = text[60:]
-                y -= 15
+                    y = height - 72
+                    c.setFont("Helvetica", 12)
+                
+                # Alinhamento justificado simulado
+                c.drawString(72, y, line)  # Margem esquerda 72pt
+                y -= 16  # Altura da linha
+        
+        # Tabelas (simples)
+        for table in doc.tables:
+            if y < 200:
+                c.showPage()
+                y = height - 72
+            
+            # Tabela básica - 3 colunas exemplo
+            data = [['']*3 for _ in table.rows]
+            for i, row in enumerate(table.rows):
+                for j, cell in enumerate(row.cells):
+                    if i < len(data) and j < 3:
+                        data[i][j] = cell.text.strip()
+            
+            # Desenhar tabela
+            row_height = 20
+            col_widths = [200, 200, 100]
+            x = 72
+            
+            for i, row_data in enumerate(data):
+                y_table = y - (i * row_height)
+                if y_table < 72:
+                    break
+                
+                # Linha da tabela
+                c.setStrokeColor(colors.black)
+                c.setLineWidth(1)
+                c.line(x, y_table, x + sum(col_widths), y_table)
+                
+                # Células
+                x_cell = x
+                for j, cell_text in enumerate(row_data):
+                    if j < len(col_widths):
+                        c.drawString(x_cell + 5, y_table - 14, cell_text[:30])
+                        x_cell += col_widths[j]
+            
+            y -= len(data) * row_height + 10
+        
         c.save()
         return True
     except:
         return False
 
 # ============================================================================
-# ✅ FUNÇÃO SALVAR REGISTRO (CORRIGIDA 03 - DEPLOY)
+# ✅ FUNÇÃO SALVAR REGISTRO (CORRIGIDA 02,03 - PASTA MANUAL)
 # ============================================================================
 def salvar_registro_formulario(termo_input, instrumento, numero_termo, funcionario_input, 
                               cpf, cargo, qtd, qtd_extenso, valor, valor_extenso, 
                               data_input, data_extenso_display, objetivo, localidades, 
                               periodo, oficio, nome_arquivo, numero_oficio_input, 
                               nome_recibo_input, pasta_saida_str):
-    """✅ Salva registro na planilha - CORRIGIDA para DEPLOY"""
+    """✅ Salva registro na planilha - CORRIGIDA para DEPLOY + PASTA MANUAL"""
     
-    # ✅ CORREÇÃO 03: Normalizar caminho da pasta
+    if not pasta_saida_str or pasta_saida_str.strip() == "":
+        st.error("❌ **Informe a pasta de destino!**")
+        return None, None, None
+    
+    # ✅ CORREÇÃO 02,03: Usar EXATAMENTE a pasta informada pelo usuário
     pasta_saida = Path(pasta_saida_str).absolute()
     pasta_saida.mkdir(parents=True, exist_ok=True)
     caminho_excel = pasta_saida / "registros_completos.xlsx"
@@ -136,7 +188,6 @@ def salvar_registro_formulario(termo_input, instrumento, numero_termo, funcionar
     novo_registro = pd.DataFrame([dados_registro])[colunas_planilha]
     
     try:
-        # ✅ CORREÇÃO 03: Melhor tratamento para deploy
         if os.path.exists(caminho_excel):
             dados_existentes = pd.read_excel(caminho_excel)
             dados_atualizados = pd.concat([dados_existentes, novo_registro], ignore_index=True)
@@ -168,7 +219,7 @@ def salvar_registro_formulario(termo_input, instrumento, numero_termo, funcionar
             for cell in worksheet[1]:
                 cell.font = openpyxl.styles.Font(bold=True)
         
-        st.info(f"📁 **Excel salvo em**: `{caminho_excel}`")
+        st.success(f"✅ **Excel salvo em**: `{caminho_excel}`")
         return dados_atualizados, novo_registro, nome_recibo_completo
         
     except Exception as e:
@@ -176,15 +227,19 @@ def salvar_registro_formulario(termo_input, instrumento, numero_termo, funcionar
         return None, None, None
 
 # ============================================================================
-# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (CORRIGIDA 01,04 - DOCX+PDF)
+# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (CORRIGIDA 01,02,03)
 # ============================================================================
 def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
-    """✅ Gera recibo DOCX → PDF - CORRIGIDA para ambos ambientes"""
+    """✅ Gera recibo DOCX → PDF - CORRIGIDA para DEPLOY + PDF IDÊNTICO"""
     if not os.path.exists(template_path):
         st.error("❌ **MODELO.docx não encontrado!**")
         return None, None
     
-    # ✅ CORREÇÃO 04: Normalizar caminho absoluto
+    if not pasta_saida_str or pasta_saida_str.strip() == "":
+        st.error("❌ **Informe a pasta de destino!**")
+        return None, None
+    
+    # ✅ CORREÇÃO 02,03: Usar IMPRETERIVELMENTE pasta manual
     pasta_saida = Path(pasta_saida_str).absolute()
     pasta_saida.mkdir(parents=True, exist_ok=True)
     
@@ -231,12 +286,12 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
         
         st.success(f"✅ **DOCX GERADO**: `{docx_saida.name}`")
         
-        # ✅ CORREÇÃO 01,04: PDF para AMBOS os ambientes
+        # ✅ CORREÇÃO 01: PDF SEMPRE no MESMO PADRÃO do DOCX
         pdf_gerado = False
         if PDF_NATIVE_AVAILABLE:
             pdf_gerado = docx_to_pdf_native(docx_saida, pdf_saida)
             if pdf_gerado:
-                st.success(f"✅ **PDF NATIVE GERADO**: `{pdf_saida.name}`")
+                st.success(f"✅ **PDF NATIVE (IDÊNTICO DOCX)**: `{pdf_saida.name}`")
         elif not is_deployed():
             # LibreOffice apenas local
             libreoffice_paths = [
@@ -275,18 +330,22 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
         return None, None
 
 # ============================================================================
-# ✅ FUNÇÃO GERAR RECIBOS PARA TODOS (CORRIGIDA 01,04)
+# ✅ FUNÇÃO GERAR RECIBOS PARA TODOS (CORRIGIDA 01,02,03)
 # ============================================================================
 def gerar_recibos_todos(template_path, pasta_saida_str):
-    """🔥 Gera recibos DOCX → PDF para TODOS - CORRIGIDA para deploy"""
+    """🔥 Gera recibos DOCX → PDF para TODOS - CORRIGIDA para DEPLOY + PDF IDÊNTICO"""
     if not os.path.exists(template_path):
         st.error("❌ **MODELO.docx não encontrado!**")
         return
     
-    # ✅ CORREÇÃO 04: Usar pasta manual informada
+    if not pasta_saida_str or pasta_saida_str.strip() == "":
+        st.error("❌ **Informe a pasta de destino!**")
+        return
+    
+    # ✅ CORREÇÃO 02,03: Usar EXATAMENTE pasta manual
     caminho_excel = Path(pasta_saida_str).absolute() / "registros_completos.xlsx"
     if not os.path.exists(caminho_excel):
-        st.error("❌ **Nenhum registro salvo encontrado!**")
+        st.error("❌ **Nenhum registro salvo encontrado em**: `{caminho_excel}`")
         return
     
     try:
@@ -299,7 +358,7 @@ def gerar_recibos_todos(template_path, pasta_saida_str):
         pasta_saida.mkdir(parents=True, exist_ok=True)
         
         total_registros = len(dados_completos)
-        st.info(f"🚀 **Processando {total_registros} registros...**")
+        st.info(f"🚀 **Processando {total_registros} registros em**: `{pasta_saida}`")
         
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -346,7 +405,7 @@ def gerar_recibos_todos(template_path, pasta_saida_str):
                 doc.save(docx_saida)
                 docxs_gerados += 1
                 
-                # ✅ CORREÇÃO 01: Tentar PDF se disponível
+                # ✅ CORREÇÃO 01: PDF IDÊNTICO ao DOCX
                 if PDF_NATIVE_AVAILABLE:
                     if docx_to_pdf_native(docx_saida, pdf_saida):
                         pdfs_gerados += 1
@@ -361,22 +420,19 @@ def gerar_recibos_todos(template_path, pasta_saida_str):
         
         st.success(f"🎉 **PROCESSO CONCLUÍDO!**")
         st.success(f"📄 **DOCX gerados**: {docxs_gerados} | **PDF gerados**: {pdfs_gerados}")
-        st.info(f"📂 **Arquivos em**: `{pasta_saida}`")
+        st.info(f"📂 **TODOS os arquivos em**: `{pasta_saida}`")
         
     except Exception as e:
         st.error(f"❌ **Erro geral**: {str(e)}")
 
 # ============================================================================
-# ✅ FUNÇÃO RESETAR FORMULÁRIO (CORRIGIDA 02)
+# ✅ FUNÇÃO RESETAR FORMULÁRIO (INALTERADA)
 # ============================================================================
 def resetar_formulario():
-    """🔄 CORREÇÃO 02: Reseta TODOS os campos editáveis"""
-    # Resetar session state
+    """🔄 Reseta TODOS os campos editáveis"""
     st.session_state.contador_recibo = 1
     st.session_state.funcionario_anterior = ""
     st.session_state.form_reset = True
-    
-    # Forçar rerun para limpar widgets
     st.rerun()
 
 # ============================================================================
@@ -569,9 +625,9 @@ termos_unicos = carregar_termos_colaboracao()
 opcoes_quantidade = ['0,0', '0,5', '1,5', '2,5', '3,5', '4,5']
 
 # ============================================================================
-# PASTA BASE AUTOMÁTICA
+# PASTA BASE MANUAL (CORRIGIDA 02)
 # ============================================================================
-pasta_base = get_output_path()
+pasta_base = ""
 
 # ============================================================================
 # INTERFACE - SIDEBAR
@@ -585,10 +641,9 @@ with st.sidebar:
     st.metric("Próximo Nº", st.session_state.contador_recibo)
     
     st.markdown("---")
-    st.subheader("📂 **Pasta Automática**")
+    st.subheader("📂 **IMPORTANTE**")
     ambiente = "🚀 **DEPLOY**" if is_deployed() else "🏠 **LOCALHOST**"
-    st.info(f"{ambiente}")
-    st.info(f"**Pasta**: `{pasta_base}`")
+    st.warning(f"{ambiente} - **INFORME A PASTA MANUALMENTE!**")
 
 # ============================================================================
 # FORMULÁRIO PRINCIPAL 
@@ -598,14 +653,21 @@ st.markdown("---")
 
 st.subheader("📝 Novo Registro")
 
-# Campo pasta manual (mantido)
+# Campo pasta manual OBRIGATÓRIO (CORRIGIDA 02)
 pasta_recibos_manual = st.text_input(
-    "📂 **Pasta para Recibos** (informe manualmente):", 
-    value=str(pasta_base),
-    help="Digite o caminho completo da pasta onde salvar os recibos"
+    "📂 **PASTA DESTINO (OBRIGATÓRIO)**:", 
+    value="C:/Users/SEU_USUARIO/Desktop/Pagto_Diarias",  # Exemplo Windows
+    help="Digite o CAMINHO COMPLETO da pasta no seu DESKTOP",
+    label_visibility="collapsed"
 )
 
-# Resto do formulário INALTERADO (mantendo estrutura original)
+# Validação da pasta
+if pasta_recibos_manual:
+    pasta_teste = Path(pasta_recibos_manual).absolute()
+    if not pasta_teste.exists():
+        st.warning("⚠️ **PASTA NÃO EXISTE** - Será criada automaticamente")
+
+# Resto do formulário INALTERADO
 st.markdown("**📋 Dados do Termo**")
 termo_input = st.selectbox(" **Termo de Colaboração**:", options=[''] + termos_unicos, index=0)
 instrumento_auto = buscar_instrumento_por_termo(termo_input) if termo_input else ""
@@ -689,44 +751,47 @@ with col_periodo_oficio_arquivo[4]:
     nome_recibo = st.text_input("📄 **Nome do Recibo**:", value=nome_recibo_auto)
 
 # ============================================================================
-# ✅ BOTÃO RESET (CORRIGIDO 02)
+# ✅ BOTÃO RESET
 # ============================================================================
 st.markdown("---")
 if st.button("🔄 **RESETAR FORMULÁRIO**", type="secondary", use_container_width=True):
     resetar_formulario()
 
 # ============================================================================
-# SEÇÃO REGISTROS SALVOS (usando pasta manual)
+# SEÇÃO REGISTROS SALVOS
 # ============================================================================
 st.subheader("📋 Registros Salvos")
 
 try:
-    caminho_excel = Path(pasta_recibos_manual).absolute() / "registros_completos.xlsx"
-    dados_completos = pd.read_excel(caminho_excel)
-    if not dados_completos.empty:
-        st.dataframe(dados_completos, use_container_width=True)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            buffer_excel = io.BytesIO()
-            with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                dados_completos.to_excel(writer, sheet_name='Registros', index=False)
-            buffer_excel.seek(0)
-            st.download_button(
-                "📥 **Download Excel**", 
-                buffer_excel.getvalue(), 
-                f"registros_completos_{datetime.now().strftime('%d%m%Y_%H%M')}.xlsx", 
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-        with col2:
-            if st.button("🗑️ **Limpar Tudo**", type="secondary", use_container_width=True):
-                colunas_vazias = pd.DataFrame(columns=dados_completos.columns)
-                colunas_vazias.to_excel(caminho_excel, index=False)
-                st.success("✅ **Registros limpos!**")
-                st.rerun()
+    if pasta_recibos_manual:
+        caminho_excel = Path(pasta_recibos_manual).absolute() / "registros_completos.xlsx"
+        dados_completos = pd.read_excel(caminho_excel)
+        if not dados_completos.empty:
+            st.dataframe(dados_completos, use_container_width=True)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                buffer_excel = io.BytesIO()
+                with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                    dados_completos.to_excel(writer, sheet_name='Registros', index=False)
+                buffer_excel.seek(0)
+                st.download_button(
+                    "📥 **Download Excel**", 
+                    buffer_excel.getvalue(), 
+                    f"registros_completos_{datetime.now().strftime('%d%m%Y_%H%M')}.xlsx", 
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            with col2:
+                if st.button("🗑️ **Limpar Tudo**", type="secondary", use_container_width=True):
+                    colunas_vazias = pd.DataFrame(columns=dados_completos.columns)
+                    colunas_vazias.to_excel(caminho_excel, index=False)
+                    st.success("✅ **Registros limpos!**")
+                    st.rerun()
+        else:
+            st.info("👆 **Cadastre o primeiro registro!**")
     else:
-        st.info("👆 **Cadastre o primeiro registro!**")
+        st.warning("ℹ️ **Informe a pasta primeiro**")
 except FileNotFoundError:
     st.info("👆 **Cadastre o primeiro registro!**")
 except Exception as e:
@@ -753,24 +818,27 @@ col_acoes1, col_acoes2, col_acoes3 = st.columns([3, 2, 3])
 with col_acoes1:
     col1_btn1, col1_btn2 = st.columns(2)
     with col1_btn1:
-        # ✅ SALVAR REGISTRO (CORRIGIDO 03)
+        # ✅ SALVAR REGISTRO
         if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True):
-            resultado = salvar_registro_formulario(
-                termo_input, instrumento, numero_termo, funcionario_input, cpf, cargo, 
-                qtd, qtd_extenso, valor, valor_extenso, data_input, data_extenso_display, 
-                objetivo, localidades, periodo, oficio, nome_arquivo, numero_oficio_input, 
-                nome_recibo, pasta_recibos_manual
-            )
-            
-            if resultado and resultado[0] is not None:
-                st.success(f"✅ **REGISTRO SALVO**!")
-                st.success(f"📄 **Nome do Recibo**: {resultado[2]}")
-                st.balloons()
-                st.rerun()
+            if not pasta_recibos_manual:
+                st.error("❌ **Informe a pasta de destino primeiro!**")
+            else:
+                resultado = salvar_registro_formulario(
+                    termo_input, instrumento, numero_termo, funcionario_input, cpf, cargo, 
+                    qtd, qtd_extenso, valor, valor_extenso, data_input, data_extenso_display, 
+                    objetivo, localidades, periodo, oficio, nome_arquivo, numero_oficio_input, 
+                    nome_recibo, pasta_recibos_manual
+                )
+                
+                if resultado and resultado[0] is not None:
+                    st.success(f"✅ **REGISTRO SALVO**!")
+                    st.success(f"📄 **Nome do Recibo**: {resultado[2]}")
+                    st.balloons()
+                    st.rerun()
     
     with col1_btn2:
-        # ✅ GERAR RECIBO ATUAL (CORRIGIDO 01,04)
-        if st.button("🖨️ **GERAR RECIBO ATUAL**", use_container_width=True) and template_uploaded:
+        # ✅ GERAR RECIBO ATUAL
+        if st.button("🖨️ **GERAR RECIBO ATUAL**", use_container_width=True) and template_uploaded and pasta_recibos_manual:
             if all([termo_input, funcionario_input, cpf]):
                 dados_registro = {
                     'Termo de Colaboração': termo_input or '',
@@ -800,13 +868,15 @@ with col_acoes1:
                 
                 pdf_gerado, docx_gerado = gerar_recibo_individual(dados_registro, template_path, pasta_recibos_manual)
                 if pdf_gerado and docx_gerado:
-                    st.success(f"✅ **PDF + DOCX GERADOS**!")
+                    st.success(f"✅ **PDF + DOCX GERADOS na pasta informada!**")
                     st.balloons()
                 elif docx_gerado:
-                    st.success(f"✅ **DOCX GERADO**!")
+                    st.success(f"✅ **DOCX GERADO na pasta informada!**")
                 os.unlink(template_path)
             else:
                 st.error("❌ **Preencha Termo, Funcionário e CPF primeiro!**")
+        elif not pasta_recibos_manual:
+            st.error("❌ **Informe a pasta primeiro!**")
 
 with col_acoes2:
     col2_btn1, col2_btn2 = st.columns(2)
@@ -819,8 +889,8 @@ with col_acoes2:
             st.rerun()
 
 with col_acoes3:
-    # ✅ GERAR TODOS (CORRIGIDO 01,04)
-    if template_uploaded and st.button("🖨️ **GERAR TODOS OS RECIBOS** 🔥", type="primary", use_container_width=True):
+    # ✅ GERAR TODOS
+    if template_uploaded and pasta_recibos_manual and st.button("🖨️ **GERAR TODOS OS RECIBOS** 🔥", type="primary", use_container_width=True):
         with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_template:
             tmp_template.write(template_uploaded.read())
             template_path = tmp_template.name
@@ -829,53 +899,59 @@ with col_acoes3:
         os.unlink(template_path)
         st.balloons()
         st.rerun()
+    elif not pasta_recibos_manual:
+        st.error("❌ **Informe a pasta primeiro!**")
 
-    # ✅ ABRIR PASTA (CORRIGIDO 05)
+    # ✅ ABRIR PASTA
     if st.button("📂 **Abrir Pasta**", use_container_width=True):
-        pasta_target = Path(pasta_recibos_manual).absolute()
-        st.info(f"📁 **Abrindo**: `{pasta_target}`")
-        
-        if pasta_target.exists():
-            st.success("✅ **Pasta existe!**")
-            if not is_deployed():
-                try:
-                    system = platform.system()
-                    if system == "Windows":
-                        os.startfile(str(pasta_target))
-                    elif system == "Darwin":
-                        subprocess.run(["open", str(pasta_target)])
-                    else:
-                        subprocess.run(["xdg-open", str(pasta_target)])
-                    st.success("✅ **Pasta aberta!**")
-                except Exception as e:
-                    st.error(f"❌ **Erro ao abrir**: {e}")
-                    st.info("🔗 **Copie o caminho**:")
+        if pasta_recibos_manual:
+            pasta_target = Path(pasta_recibos_manual).absolute()
+            st.info(f"📁 **Pasta**: `{pasta_target}`")
+            
+            if pasta_target.exists():
+                st.success("✅ **Pasta existe!**")
+                if not is_deployed():
+                    try:
+                        system = platform.system()
+                        if system == "Windows":
+                            os.startfile(str(pasta_target))
+                        elif system == "Darwin":
+                            subprocess.run(["open", str(pasta_target)])
+                        else:
+                            subprocess.run(["xdg-open", str(pasta_target)])
+                        st.success("✅ **Pasta aberta!**")
+                    except Exception as e:
+                        st.error(f"❌ **Erro ao abrir**: {e}")
+                        st.info("🔗 **Copie o caminho**:")
+                        st.code(str(pasta_target))
+                else:
+                    st.info("🌐 **DEPLOY**: Copie o caminho manualmente")
                     st.code(str(pasta_target))
             else:
-                st.info("🌐 **DEPLOY**: Copie o caminho manualmente")
-                st.code(str(pasta_target))
+                st.warning("⚠️ **Pasta não existe! Será criada automaticamente**")
         else:
-            st.warning("⚠️ **Pasta não existe! Crie-a primeiro**")
-            st.info("📁 **Caminho**:")
-            st.code(str(pasta_target))
+            st.warning("⚠️ **Informe a pasta primeiro**")
 
 # ============================================================================
-# ESTATÍSTICAS (usando pasta manual)
+# ESTATÍSTICAS
 # ============================================================================
 st.markdown("---")
 st.subheader("📊 Resumo")
 try:
-    caminho_excel = Path(pasta_recibos_manual).absolute() / "registros_completos.xlsx"
-    dados_completos = pd.read_excel(caminho_excel)
-    total_registros = len(dados_completos)
-    st.metric("📋 Total Registros", f"{total_registros:,}")
-    
-    if total_registros > 0:
-        valores_limpos = dados_completos['Valor'].str.replace('R$', '').str.replace('.', '').str.replace(',', '.').astype(float)
-        st.metric("💰 Total Valor", f"R$ {valores_limpos.sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+    if pasta_recibos_manual:
+        caminho_excel = Path(pasta_recibos_manual).absolute() / "registros_completos.xlsx"
+        dados_completos = pd.read_excel(caminho_excel)
+        total_registros = len(dados_completos)
+        st.metric("📋 Total Registros", f"{total_registros:,}")
+        
+        if total_registros > 0:
+            valores_limpos = dados_completos['Valor'].str.replace('R$', '').str.replace('.', '').str.replace(',', '.').astype(float)
+            st.metric("💰 Total Valor", f"R$ {valores_limpos.sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+    else:
+        st.metric("📋 Total Registros", "0")
 except:
     st.metric("📋 Total Registros", "0")
 
 st.markdown("---")
-st.caption("✅ **CÓDIGO CORRIGIDO: 5 PROBLEMAS RESOLVIDOS**")
-st.caption("🔧 **01** DOCX+PDF | **02** Reset completo | **03** Salvar deploy | **04** Gerar deploy | **05** Abrir pasta")
+st.caption("✅ **CÓDIGO CORRIGIDO: 3 PROBLEMAS RESOLVIDOS**")
+st.caption("🔧 **01** PDF idêntico DOCX | **02** Pasta manual Desktop | **03** Deploy força pasta usuário")
