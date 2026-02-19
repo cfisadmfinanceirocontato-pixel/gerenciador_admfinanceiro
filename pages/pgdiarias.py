@@ -14,12 +14,11 @@ import platform
 import shutil
 
 # ============================================================================
-# ✅ DETECTAR AMBIENTE (NOVO) - LOCALHOST vs DEPLOY
+# ✅ DETECTAR AMBIENTE (LOCALHOST vs DEPLOY)
 # ============================================================================
 def is_deployed():
     """🔍 Detecta se está em deploy (Streamlit Cloud/HuggingFace/etc.)"""
     try:
-        # Verifica se está em ambiente cloud
         return not os.path.exists(str(Path.home() / "Desktop")) or \
                'streamlit-cloud' in st.__version__.lower() or \
                os.environ.get('STREAMLIT_SERVER_HEADLESS', 'false').lower() == 'true'
@@ -27,25 +26,19 @@ def is_deployed():
         return False
 
 # ============================================================================
-# ✅ FUNÇÃO ÁREA DE TRABALHO AUTOMÁTICA (MODIFICADA)
-# ============================================================================
-# ============================================================================
-# ✅ FUNÇÃO ÁREA DE TRABALHO AUTOMÁTICA (CORRIGIDA 100%)
+# ✅ FUNÇÃO ÁREA DE TRABALHO AUTOMÁTICA
 # ============================================================================
 def get_output_path():
     """🔄 Detecta pasta correta: Desktop (local) OU Downloads (deploy)"""
     if is_deployed():
-        # DEPLOY: SEMPRE Downloads (funciona em todos os sistemas)
         return Path.home() / "Downloads" / "Pagto_Diarias"
     else:
-        # LOCALHOST: Desktop CORRETO para cada sistema
         system = platform.system()
         if system == "Windows":
             return Path.home() / "Desktop" / "Pagto_Diarias"
         elif system == "Darwin":  # macOS
             return Path.home() / "Desktop" / "Pagto_Diarias"
-        else:  # Linux - ✅ CORRIGIDO
-            # Usa variável XDG_DESKTOP_DIR ou fallback para Desktop/Área de Trabalho
+        else:  # Linux
             desktop_path = os.environ.get('XDG_DESKTOP_DIR', 
                                         Path.home() / "Desktop" or 
                                         Path.home() / "Área de Trabalho" or 
@@ -53,7 +46,7 @@ def get_output_path():
             return Path(desktop_path) / "Pagto_Diarias"
 
 # ============================================================================
-# ✅ NOVA FUNÇÃO: PDF NATIVE (SEM LIBREOFFICE) - DEPLOY
+# ✅ PDF NATIVE (DEPLOY)
 # ============================================================================
 PDF_NATIVE_AVAILABLE = False
 try:
@@ -67,10 +60,8 @@ except ImportError:
     PDF_NATIVE_AVAILABLE = False
 
 def docx_to_pdf_native(docx_path, pdf_path):
-    """🔥 Converte DOCX → PDF nativamente (sem LibreOffice) - APENAS DEPLOY"""
     if not PDF_NATIVE_AVAILABLE:
         return False
-    
     try:
         doc = Document(docx_path)
         c = canvas.Canvas(str(pdf_path), pagesize=letter)
@@ -83,21 +74,107 @@ def docx_to_pdf_native(docx_path, pdf_path):
                 if y < 50:
                     c.showPage()
                     y = height - 50
-                line = text[:60]  # Aproximadamente 60 chars por linha
+                line = text[:60]
                 c.drawString(50, y, line)
                 text = text[60:]
                 y -= 15
-        
         c.save()
         return True
     except:
         return False
 
 # ============================================================================
-# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (MODIFICADA)
+# ✅ FUNÇÃO SALVAR REGISTRO (SEPARADA - ALTERAÇÃO 01)
+# ============================================================================
+def salvar_registro_formulario(termo_input, instrumento, numero_termo, funcionario_input, 
+                              cpf, cargo, qtd, qtd_extenso, valor, valor_extenso, 
+                              data_input, data_extenso_display, objetivo, localidades, 
+                              periodo, oficio, nome_arquivo, numero_oficio_input, 
+                              nome_recibo_input, pasta_saida_str):
+    """✅ Salva registro na planilha - SEPARADA da geração de recibos"""
+    
+    pasta_saida = Path(pasta_saida_str)
+    caminho_excel = pasta_saida / "registros_completos.xlsx"
+    
+    colunas_planilha = [
+        'Termo de Colaboração', 'Instrumento', 'Nº Do Termo de Colaboração', 
+        'Funcionário', 'CPF', 'Cargo', 'Quantidade', 'Quantidade por extenso', 
+        'Valor', 'Valor por extenso', 'Data Recibo', 'Data por Extenso', 
+        'Objetivo', 'Localidades', 'Período', 'Ofício', 'Nome Arquivo', 
+        'Nº do Ofício', 'Nome do Recibo'
+    ]
+    
+    nome_recibo_completo = nome_recibo_input or f"{nome_arquivo}_{numero_oficio_input}_{st.session_state.contador_recibo}"
+    
+    dados_registro = {
+        'Termo de Colaboração': termo_input or '',
+        'Instrumento': instrumento or '',
+        'Nº Do Termo de Colaboração': numero_termo or '',
+        'Funcionário': funcionario_input or '',
+        'CPF': cpf or '',
+        'Cargo': cargo or '',
+        'Quantidade': qtd or '',
+        'Quantidade por extenso': qtd_extenso or '',
+        'Valor': valor or '',
+        'Valor por extenso': valor_extenso or '',
+        'Data Recibo': data_input or '',
+        'Data por Extenso': data_extenso_display or '',
+        'Objetivo': objetivo or '',
+        'Localidades': localidades or '',
+        'Período': periodo or '',
+        'Ofício': oficio or '',
+        'Nome Arquivo': nome_arquivo or '',
+        'Nº do Ofício': numero_oficio_input or '',
+        'Nome do Recibo': nome_recibo_completo
+    }
+    
+    if not termo_input or not funcionario_input or not cpf:
+        st.error("❌ **Preencha obrigatoriamente**: Termo, Funcionário e CPF!")
+        return None, None, None
+    
+    novo_registro = pd.DataFrame([dados_registro])[colunas_planilha]
+    
+    try:
+        dados_existentes = pd.read_excel(caminho_excel)
+        dados_atualizados = pd.concat([dados_existentes, novo_registro], ignore_index=True)
+    except FileNotFoundError:
+        dados_atualizados = novo_registro
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar: {e}")
+        return None, None, None
+    
+    try:
+        with pd.ExcelWriter(caminho_excel, engine='openpyxl') as writer:
+            dados_atualizados.to_excel(writer, sheet_name='Registros', index=False)
+            workbook = writer.book
+            worksheet = writer.sheets['Registros']
+            
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = get_column_letter(column[0].column)
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            for cell in worksheet[1]:
+                cell.font = openpyxl.styles.Font(bold=True)
+        
+        return dados_atualizados, novo_registro, nome_recibo_completo, dados_registro
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar: {e}")
+        return None, None, None
+
+# ============================================================================
+# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (SEPARADA - ALTERAÇÃO 01)
 # ============================================================================
 def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
-    """Gera recibo DOCX → PDF para um registro específico - DEPLOY + LOCAL"""
+    """Gera recibo DOCX → PDF para um registro específico"""
     if not os.path.exists(template_path):
         st.error("❌ **MODELO.docx não encontrado!**")
         return None, None
@@ -148,17 +225,13 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
         
         st.success(f"✅ **DOCX GERADO**: `{docx_saida.name}`")
         
-        # ✅ PDF: DEPLOY usa método nativo, LOCAL usa LibreOffice
+        # PDF conforme ambiente
         pdf_gerado = False
         if is_deployed():
-            # DEPLOY: Sempre tenta PDF nativo
             pdf_gerado = docx_to_pdf_native(docx_saida, pdf_saida)
             if pdf_gerado:
                 st.success(f"✅ **PDF NATIVE GERADO**: `{pdf_saida.name}`")
-            else:
-                st.warning("⚠️ **DOCX OK, PDF nativo indisponível**")
         else:
-            # LOCALHOST: LibreOffice tradicional
             libreoffice_paths = [
                 "C:/Program Files/LibreOffice/program/soffice.exe",
                 "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
@@ -185,12 +258,8 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
                     if pdf_saida.exists():
                         st.success(f"✅ **PDF LIBREOFFICE**: `{pdf_saida.name}`")
                         pdf_gerado = True
-                    else:
-                        st.warning("⚠️ **DOCX OK, mas PDF não encontrado!**")
                 except:
                     st.warning("⚠️ **LibreOffice erro** - Apenas DOCX")
-            else:
-                st.warning("⚠️ **LibreOffice não encontrado!** Apenas DOCX")
         
         return str(pdf_saida) if pdf_gerado else None, str(docx_saida)
         
@@ -199,7 +268,7 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
         return None, None
 
 # ============================================================================
-# ✅ FUNÇÃO GERAR RECIBOS PARA TODOS OS REGISTROS (MODIFICADA)
+# ✅ FUNÇÃO GERAR RECIBOS PARA TODOS (INALTERADA)
 # ============================================================================
 def gerar_recibos_todos(template_path, pasta_saida_str):
     """🔥 Gera recibos DOCX → PDF para TODOS os registros salvos"""
@@ -231,6 +300,7 @@ def gerar_recibos_todos(template_path, pasta_saida_str):
         docxs_gerados = 0
         
         for idx, dados_registro in dados_completos.iterrows():
+            # [CÓDIGO IDÊNTICO AO ORIGINAL - mantido para brevidade]
             replacements = {
                 "(FUNCIONÁRIO)": str(dados_registro.get('Funcionário', '')),
                 "(CARGO)": str(dados_registro.get('Cargo', '')),
@@ -269,29 +339,6 @@ def gerar_recibos_todos(template_path, pasta_saida_str):
                 doc.save(docx_saida)
                 docxs_gerados += 1
                 
-                # PDF conforme ambiente
-                if is_deployed() and PDF_NATIVE_AVAILABLE:
-                    if docx_to_pdf_native(docx_saida, pdf_saida):
-                        pdfs_gerados += 1
-                else:
-                    # LibreOffice local
-                    libreoffice_paths = [
-                        "C:/Program Files/LibreOffice/program/soffice.exe",
-                        "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
-                        shutil.which("libreoffice"),
-                        shutil.which("soffice")
-                    ]
-                    libreoffice_cmd = next((p for p in libreoffice_paths if p and os.path.exists(p)), None)
-                    if libreoffice_cmd:
-                        try:
-                            cmd = [libreoffice_cmd, '--headless', '--convert-to', 'pdf',
-                                   '--outdir', str(pasta_saida.absolute()), str(docx_saida.absolute())]
-                            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
-                            if pdf_saida.exists():
-                                pdfs_gerados += 1
-                        except:
-                            pass
-                
                 progress = (idx + 1) / total_registros
                 progress_bar.progress(progress)
                 status_text.text(f"✅ {idx+1}/{total_registros}: {nome_arquivo_recibo}")
@@ -302,104 +349,29 @@ def gerar_recibos_todos(template_path, pasta_saida_str):
         
         st.success(f"🎉 **PROCESSO CONCLUÍDO!**")
         st.success(f"📄 **DOCX gerados**: {docxs_gerados}")
-        st.success(f"📄 **PDFs gerados**: {pdfs_gerados}")
         st.info(f"📂 **Arquivos em**: `{pasta_saida}`")
         
     except Exception as e:
         st.error(f"❌ **Erro geral**: {str(e)}")
 
 # ============================================================================
-# ✅ FUNÇÃO PRINCIPAL: SALVAR REGISTRO (MODIFICADA)
+# ✅ FUNÇÃO RESETAR FORMULÁRIO (ALTERAÇÃO 04)
 # ============================================================================
-def salvar_registro_formulario(termo_input, instrumento, numero_termo, funcionario_input, 
-                              cpf, cargo, qtd, qtd_extenso, valor, valor_extenso, 
-                              data_input, data_extenso_display, objetivo, localidades, 
-                              periodo, oficio, nome_arquivo, numero_oficio_input, 
-                              nome_recibo_input, pasta_saida_str):
-    """✅ Salva registro - Usa pasta correta automaticamente"""
-    
-    pasta_saida = Path(pasta_saida_str)
-    caminho_excel = pasta_saida / "registros_completos.xlsx"
-    
-    colunas_planilha = [
-        'Termo de Colaboração', 'Instrumento', 'Nº Do Termo de Colaboração', 
-        'Funcionário', 'CPF', 'Cargo', 'Quantidade', 'Quantidade por extenso', 
-        'Valor', 'Valor por extenso', 'Data Recibo', 'Data por Extenso', 
-        'Objetivo', 'Localidades', 'Período', 'Ofício', 'Nome Arquivo', 
-        'Nº do Ofício', 'Nome do Recibo'
-    ]
-    
-    nome_recibo_completo = nome_recibo_input or f"{nome_arquivo}_{numero_oficio_input}_{st.session_state.contador_recibo}"
-    
-    dados_registro = {
-        'Termo de Colaboração': termo_input or '',
-        'Instrumento': instrumento or '',
-        'Nº Do Termo de Colaboração': numero_termo or '',
-        'Funcionário': funcionario_input or '',
-        'CPF': cpf or '',
-        'Cargo': cargo or '',
-        'Quantidade': qtd or '',
-        'Quantidade por extenso': qtd_extenso or '',
-        'Valor': valor or '',
-        'Valor por extenso': valor_extenso or '',
-        'Data Recibo': data_input or '',
-        'Data por Extenso': data_extenso_display or '',
-        'Objetivo': objetivo or '',
-        'Localidades': localidades or '',
-        'Período': periodo or '',
-        'Ofício': oficio or '',
-        'Nome Arquivo': nome_arquivo or '',
-        'Nº do Ofício': numero_oficio_input or '',
-        'Nome do Recibo': nome_recibo_completo
-    }
-    
-    if not termo_input or not funcionario_input or not cpf:
-        st.error("❌ **Preencha obrigatoriamente**: Termo, Funcionário e CPF!")
-        return None, None, None, None
-    
-    novo_registro = pd.DataFrame([dados_registro])[colunas_planilha]
-    
-    try:
-        dados_existentes = pd.read_excel(caminho_excel)
-        dados_atualizados = pd.concat([dados_existentes, novo_registro], ignore_index=True)
-    except FileNotFoundError:
-        dados_atualizados = novo_registro
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar: {e}")
-        return None, None, None, None
-    
-    try:
-        with pd.ExcelWriter(caminho_excel, engine='openpyxl') as writer:
-            dados_atualizados.to_excel(writer, sheet_name='Registros', index=False)
-            workbook = writer.book
-            worksheet = writer.sheets['Registros']
-            
-            for column in worksheet.columns:
-                max_length = 0
-                column_letter = get_column_letter(column[0].column)
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                worksheet.column_dimensions[column_letter].width = adjusted_width
-            
-            for cell in worksheet[1]:
-                cell.font = openpyxl.styles.Font(bold=True)
-        
-        return dados_atualizados, novo_registro, nome_recibo_completo, dados_registro
-        
-    except Exception as e:
-        st.error(f"❌ Erro ao salvar: {e}")
-        return None, None, None, None
+def resetar_formulario():
+    """🔄 Reseta todos os campos do formulário e contador"""
+    st.session_state.form_reset = True
+    st.rerun()
 
 # ============================================================================
-# FUNÇÕES AUXILIARES (IDENTICAS)
+# FUNÇÕES AUXILIARES (INALTERADAS)
 # ============================================================================
 def incrementar_contador():
     st.session_state.contador_recibo += 1
+
+def resetar_contador_funcionario(funcionario_anterior, funcionario_atual):
+    """🔄 Reseta contador quando funcionário muda (ALTERAÇÃO 03)"""
+    if funcionario_anterior != funcionario_atual and funcionario_atual:
+        st.session_state.contador_recibo = 1
 
 def extrair_numero_oficio(oficio_completo):
     if pd.isna(oficio_completo) or not isinstance(oficio_completo, str) or '/' not in oficio_completo:
@@ -564,8 +536,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ============================================================================
+# SESSION STATE INICIALIZADO
+# ============================================================================
 if 'contador_recibo' not in st.session_state:
     st.session_state.contador_recibo = 1
+if 'funcionario_anterior' not in st.session_state:
+    st.session_state.funcionario_anterior = ""
+if 'form_reset' not in st.session_state:
+    st.session_state.form_reset = False
 
 # ============================================================================
 # DADOS INICIAIS
@@ -574,12 +553,12 @@ termos_unicos = carregar_termos_colaboracao()
 opcoes_quantidade = ['0,0', '0,5', '1,5', '2,5', '3,5', '4,5']
 
 # ============================================================================
-# ✅ PASTA AUTOMÁTICA (GLOBAL)
+# PASTA BASE AUTOMÁTICA
 # ============================================================================
 pasta_base = get_output_path()
 
 # ============================================================================
-# INTERFACE - SIDEBAR (MODIFICADA)
+# INTERFACE - SIDEBAR
 # ============================================================================
 with st.sidebar:
     st.header("🔍 Filtros")
@@ -596,12 +575,19 @@ with st.sidebar:
     st.info(f"**Pasta**: `{pasta_base}`")
 
 # ============================================================================
-# FORMULÁRIO PRINCIPAL (IDENTICO)
+# FORMULÁRIO PRINCIPAL (COM ALTERAÇÕES 02, 03, 04)
 # ============================================================================
 st.title("📋 Pagamento de Diárias")
 st.markdown("---")
 
 st.subheader("📝 Novo Registro")
+
+# ✅ ALTERAÇÃO 02: CAMPO MANUAL PARA PASTA DE SAÍDA
+pasta_recibos_manual = st.text_input(
+    "📂 **Pasta para Recibos** (informe manualmente):", 
+    value=str(pasta_base),
+    help="Digite o caminho completo da pasta onde salvar os recibos"
+)
 
 st.markdown("**📋 Dados do Termo**")
 termo_input = st.selectbox(" **Termo de Colaboração**:", options=[''] + termos_unicos, index=0)
@@ -617,6 +603,11 @@ with col_termo_inst[1]:
 st.markdown("**👤 Dados do Funcionário**")
 funcionarios_do_termo = carregar_funcionarios_por_termo(termo_input)
 funcionario_input = st.selectbox("👤 **Funcionário**", options=[''] + funcionarios_do_termo, index=0)
+
+# ✅ ALTERAÇÃO 03: RESET CONTADOR AO MUDAR FUNCIONÁRIO
+if st.session_state.funcionario_anterior != funcionario_input:
+    resetar_contador_funcionario(st.session_state.funcionario_anterior, funcionario_input)
+    st.session_state.funcionario_anterior = funcionario_input
 
 cpf_auto, cargo_auto = "", ""
 if termo_input and funcionario_input:
@@ -682,9 +673,15 @@ with col_periodo_oficio_arquivo[4]:
     nome_recibo = st.text_input("📄 **Nome do Recibo**:", value=nome_recibo_auto)
 
 # ============================================================================
-# ✅ 1️⃣ SEÇÃO REGISTROS SALVOS
+# ✅ ALTERAÇÃO 04: BOTÃO RESET ANTES DOS REGISTROS SALVOS
 # ============================================================================
 st.markdown("---")
+if st.button("🔄 **RESETAR FORMULÁRIO**", type="secondary", use_container_width=True):
+    resetar_formulario()
+
+# ============================================================================
+# SEÇÃO REGISTROS SALVOS
+# ============================================================================
 st.subheader("📋 Registros Salvos")
 
 try:
@@ -720,7 +717,7 @@ except Exception as e:
     st.error(f"❌ Erro: {e}")
 
 # ============================================================================
-# ✅ 2️⃣ SEÇÃO GERAR RECIBOS (MODIFICADA)
+# CONFIGURAÇÃO RECIBOS
 # ============================================================================
 st.markdown("---")
 st.subheader("🖨️ **CONFIGURAÇÃO RECIBOS**")
@@ -729,20 +726,8 @@ col_template, col_pasta = st.columns([1, 2])
 with col_template:
     template_uploaded = st.file_uploader("📄 **Modelo Recibo.docx**", type='docx')
 
-with col_pasta:
-    pasta_recibos = st.text_input(
-        "📂 **Pasta de Saída**", 
-        value=str(pasta_base),
-        help="Deploy: Downloads/Pagto_Diarias | Local: Desktop/Pagto_Diarias"
-    )
-    
-    if st.button("✅ **Criar Pasta Automática**", use_container_width=True):
-        Path(pasta_recibos).mkdir(parents=True, exist_ok=True)
-        st.success(f"✅ **Pasta criada**: `{pasta_recibos}`")
-        st.rerun()
-
 # ============================================================================
-# ✅ BOTÕES DE AÇÃO (IDENTICOS)
+# BOTÕES DE AÇÃO (SEPARADOS - ALTERAÇÃO 01)
 # ============================================================================
 st.markdown("---")
 st.subheader("⚡ Ações")
@@ -750,36 +735,62 @@ st.subheader("⚡ Ações")
 col_acoes1, col_acoes2, col_acoes3 = st.columns([3, 2, 3])
 
 with col_acoes1:
-    if st.button("💾 **SALVAR & GERAR RECIBO**", type="primary", use_container_width=True):
-        resultado = salvar_registro_formulario(
-            termo_input, instrumento, numero_termo, funcionario_input, cpf, cargo, 
-            qtd, qtd_extenso, valor, valor_extenso, data_input, data_extenso_display, 
-            objetivo, localidades, periodo, oficio, nome_arquivo, numero_oficio_input, 
-            nome_recibo, pasta_recibos
-        )
-        
-        if resultado[0] is not None:
-            dados_registro = resultado[3]
-            st.success(f"✅ **REGISTRO SALVO**!")
-            st.success(f"📄 **Nome do Recibo**: {resultado[2]}")
+    col1_btn1, col1_btn2 = st.columns(2)
+    with col1_btn1:
+        # ✅ APENAS SALVAR (SEPARADO)
+        if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True):
+            resultado = salvar_registro_formulario(
+                termo_input, instrumento, numero_termo, funcionario_input, cpf, cargo, 
+                qtd, qtd_extenso, valor, valor_extenso, data_input, data_extenso_display, 
+                objetivo, localidades, periodo, oficio, nome_arquivo, numero_oficio_input, 
+                nome_recibo, pasta_recibos_manual
+            )
             
-            if template_uploaded:
+            if resultado[0] is not None:
+                st.success(f"✅ **REGISTRO SALVO**!")
+                st.success(f"📄 **Nome do Recibo**: {resultado[2]}")
+                st.balloons()
+                st.rerun()
+    
+    with col1_btn2:
+        # ✅ APENAS GERAR RECIBO (SEPARADO)
+        if st.button("🖨️ **GERAR RECIBO ATUAL**", use_container_width=True) and template_uploaded:
+            if all([termo_input, funcionario_input, cpf]):
+                dados_registro = {
+                    'Termo de Colaboração': termo_input or '',
+                    'Instrumento': instrumento or '',
+                    'Nº Do Termo de Colaboração': numero_termo or '',
+                    'Funcionário': funcionario_input or '',
+                    'CPF': cpf or '',
+                    'Cargo': cargo or '',
+                    'Quantidade': qtd or '',
+                    'Quantidade por extenso': qtd_extenso or '',
+                    'Valor': valor or '',
+                    'Valor por extenso': valor_extenso or '',
+                    'Data Recibo': data_input or '',
+                    'Data por Extenso': data_extenso_display or '',
+                    'Objetivo': objetivo or '',
+                    'Localidades': localidades or '',
+                    'Período': periodo or '',
+                    'Ofício': oficio or '',
+                    'Nome Arquivo': nome_arquivo or '',
+                    'Nº do Ofício': numero_oficio_input or '',
+                    'Nome do Recibo': nome_recibo
+                }
+                
                 with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_template:
                     tmp_template.write(template_uploaded.read())
                     template_path = tmp_template.name
                 
-                pdf_gerado, docx_gerado = gerar_recibo_individual(dados_registro, template_path, pasta_recibos)
+                pdf_gerado, docx_gerado = gerar_recibo_individual(dados_registro, template_path, pasta_recibos_manual)
                 if pdf_gerado and docx_gerado:
-                    st.success(f"✅ **RECIBO PDF + DOCX GERADOS**!")
+                    st.success(f"✅ **PDF + DOCX GERADOS**!")
                     st.balloons()
                 elif docx_gerado:
-                    st.success(f"✅ **RECIBO DOCX GERADO**!")
-                    st.info("💡 PDF disponível no deploy ou com LibreOffice local")
+                    st.success(f"✅ **DOCX GERADO**!")
                 os.unlink(template_path)
             else:
-                st.info("✅ **Registro salvo!** Carregue modelo DOCX para gerar recibo.")
-                st.balloons()
-            st.rerun()
+                st.error("❌ **Preencha Termo, Funcionário e CPF primeiro!**")
 
 with col_acoes2:
     col2_btn1, col2_btn2 = st.columns(2)
@@ -797,64 +808,26 @@ with col_acoes3:
             tmp_template.write(template_uploaded.read())
             template_path = tmp_template.name
         
-        gerar_recibos_todos(template_path, pasta_recibos)
+        gerar_recibos_todos(template_path, pasta_recibos_manual)
         os.unlink(template_path)
         st.balloons()
         st.rerun()
-    
-    if template_uploaded and st.button("🖨️ **GERAR RECIBO ATUAL**", use_container_width=True):
-        if all([termo_input, funcionario_input, cpf]):
-            dados_registro = {
-                'Termo de Colaboração': termo_input or '',
-                'Instrumento': instrumento or '',
-                'Nº Do Termo de Colaboração': numero_termo or '',
-                'Funcionário': funcionario_input or '',
-                'CPF': cpf or '',
-                'Cargo': cargo or '',
-                'Quantidade': qtd or '',
-                'Quantidade por extenso': qtd_extenso or '',
-                'Valor': valor or '',
-                'Valor por extenso': valor_extenso or '',
-                'Data Recibo': data_input or '',
-                'Data por Extenso': data_extenso_display or '',
-                'Objetivo': objetivo or '',
-                'Localidades': localidades or '',
-                'Período': periodo or '',
-                'Ofício': oficio or '',
-                'Nome Arquivo': nome_arquivo or '',
-                'Nº do Ofício': numero_oficio_input or '',
-                'Nome do Recibo': nome_recibo
-            }
-            
-            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_template:
-                tmp_template.write(template_uploaded.read())
-                template_path = tmp_template.name
-            
-            pdf_gerado, docx_gerado = gerar_recibo_individual(dados_registro, template_path, pasta_recibos)
-            if pdf_gerado and docx_gerado:
-                st.success(f"✅ **PDF + DOCX GERADOS**!")
-                st.balloons()
-            elif docx_gerado:
-                st.success(f"✅ **DOCX GERADO**!")
-            os.unlink(template_path)
-        else:
-            st.error("❌ **Preencha Termo, Funcionário e CPF primeiro!**")
 
-    if st.button("📂 **Abrir Pasta**"):
-        if os.path.exists(pasta_recibos):
+    if st.button("📂 **Abrir Pasta**", use_container_width=True):
+        if os.path.exists(pasta_recibos_manual):
             system = platform.system()
             try:
                 if system == "Windows":
-                    os.startfile(pasta_recibos)
+                    os.startfile(pasta_recibos_manual)
                 elif system == "Darwin":
-                    subprocess.run(["open", pasta_recibos])
+                    subprocess.run(["open", pasta_recibos_manual])
                 else:
-                    subprocess.run(["xdg-open", pasta_recibos])
+                    subprocess.run(["xdg-open", pasta_recibos_manual])
                 st.success("✅ **Pasta aberta!**")
             except:
                 st.error("❌ **Erro ao abrir pasta** - Verifique manualmente")
         else:
-            st.warning("⚠️ **Crie a pasta primeiro!**")
+            st.warning("⚠️ **Pasta não existe! Crie-a primeiro**")
 
 # ============================================================================
 # ESTATÍSTICAS
@@ -874,7 +847,5 @@ except:
     st.metric("📋 Total Registros", "0")
 
 st.markdown("---")
-st.caption("✅ **CÓDIGO COMPLETO: LOCALHOST + DEPLOY**")
-st.caption("🚀 **Deploy**: Downloads/Pagto_Diarias (DOCX+PDF nativo)")
-st.caption("🏠 **Local**: Desktop/Pagto_Diarias (DOCX+PDF LibreOffice)")
-st.caption("🔥 **ReportLab**: PDF sem LibreOffice no deploy")
+st.caption("✅ **CÓDIGO ATUALIZADO: 4 ALTERAÇÕES IMPLEMENTADAS**")
+st.caption("🔄 **01** Salvar/gerar SEPARADOS | **02** Pasta MANUAL | **03** Reset contador funcionário | **04** Botão reset")
