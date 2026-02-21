@@ -12,6 +12,280 @@ from pathlib import Path
 import tempfile
 import platform
 import shutil
+import requests
+import re
+
+# =============================================================================
+# 🌐 TENTATIVA DE IMPORTAR GOOGLE DRIVE API (COM FALLBACK)
+# =============================================================================
+GOOGLE_DRIVE_AVAILABLE = False
+try:
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+    import io
+    GOOGLE_DRIVE_AVAILABLE = True
+except ImportError:
+    GOOGLE_DRIVE_AVAILABLE = False
+    st.warning("⚠️ Bibliotecas do Google Drive não instaladas. Arquivos serão salvos apenas localmente.")
+    st.info("💡 Para instalar: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
+
+# =============================================================================
+# 🌐 CONFIGURAÇÃO GOOGLE DRIVE API
+# =============================================================================
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
+MODELO_DOC_ID = '1o53p8coWJalAnA6BOt6NJHTboeZoAJwc1L13VO1SN4E'  # ID do documento modelo
+
+def get_drive_service():
+    """🔧 Configura e retorna o serviço do Google Drive"""
+    if not GOOGLE_DRIVE_AVAILABLE:
+        return None
+        
+    try:
+        # Verifica se está no Streamlit Cloud
+        if 'gdrive_service_account' in st.secrets:
+            credentials = service_account.Credentials.from_service_account_info(
+                st.secrets['gdrive_service_account'], scopes=SCOPES
+            )
+        else:
+            # Para ambiente local, usar arquivo de credenciais
+            creds_file = Path.home() / '.config' / 'gdrive_credentials.json'
+            if creds_file.exists():
+                credentials = service_account.Credentials.from_service_account_file(
+                    str(creds_file), scopes=SCOPES
+                )
+            else:
+                st.warning("⚠️ Credenciais do Google Drive não encontradas. Recibos serão salvos apenas localmente.")
+                return None
+        
+        return build('drive', 'v3', credentials=credentials)
+    except Exception as e:
+        st.error(f"❌ Erro ao configurar Google Drive: {e}")
+        return None
+
+def download_modelo_docx():
+    """📥 Baixa o modelo do recibo do Google Drive"""
+    if not GOOGLE_DRIVE_AVAILABLE:
+        st.error("❌ Bibliotecas do Google Drive não instaladas. Não é possível baixar o modelo.")
+        return None
+        
+    try:
+        drive_service = get_drive_service()
+        if not drive_service:
+            # Fallback: tentar baixar diretamente via URL pública
+            st.info("🔄 Tentando baixar modelo via URL pública...")
+            return download_modelo_publico()
+        
+        # Cria arquivo temporário para o modelo
+        with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_file:
+            request = drive_service.files().export_media(
+                fileId=MODELO_DOC_ID,
+                mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            )
+            downloader = MediaIoBaseDownload(tmp_file, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+            
+            tmp_path = tmp_file.name
+        
+        st.success("✅ Modelo do recibo baixado com sucesso!")
+        return tmp_path
+    
+    except Exception as e:
+        st.error(f"❌ Erro ao baixar modelo: {e}")
+        # Fallback: tentar baixar diretamente via URL pública
+        st.info("🔄 Tentando baixar modelo via URL pública...")
+        return download_modelo_publico()
+
+def download_modelo_publico():
+    """📥 Fallback: baixar modelo via URL pública do Google Docs"""
+    try:
+        # URL para exportar documento do Google Docs como DOCX
+        url = f"https://docs.google.com/document/d/{MODELO_DOC_ID}/export?format=docx"
+        
+        response = requests.get(url)
+        if response.status_code == 200:
+            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_file:
+                tmp_file.write(response.content)
+                tmp_path = tmp_file.name
+            
+            st.success("✅ Modelo do recibo baixado com sucesso via URL pública!")
+            return tmp_path
+        else:
+            st.error(f"❌ Erro ao baixar modelo via URL pública: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"❌ Erro ao baixar modelo via URL pública: {e}")
+        return None
+
+def upload_to_drive(file_path, mime_type):
+    """📤 Faz upload de arquivo para o Google Drive do usuário"""
+    if not GOOGLE_DRIVE_AVAILABLE:
+        st.info(f"📁 Arquivo salvo localmente: {file_path}")
+        return None
+        
+    try:
+        drive_service = get_drive_service()
+        if not drive_service:
+            st.info(f"📁 Arquivo salvo localmente: {file_path}")
+            return None
+        
+        file_name = Path(file_path).name
+        
+        # Cria pasta 'Pagto_Diarias' se não existir
+        folder_name = 'Pagto_Diarias'
+        folder_id = None
+        
+        # Busca pasta existente
+        results = drive_service.files().list(
+            q=f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            spaces='drive',
+            fields='files(id, name)'
+        ).execute()
+        
+        folders = results.get('files', [])
+        if folders:
+            folder_id = folders[0]['id']
+        else:
+            # Cria nova pasta
+            folder_metadata = {
+                'name': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder'
+            }
+            folder = drive_service.files().create(body=folder_metadata, fields='id').execute()
+            folder_id = folder.get('id')
+        
+        # Upload do arquivo
+        file_metadata = {
+            'name': file_name,
+            'parents': [folder_id]
+        }
+        
+        media = MediaFileUpload(file_path, mimetype=mime_type)
+        file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+        
+        st.success(f"✅ Arquivo enviado para o Google Drive: {file_name}")
+        return file.get('id')
+    
+    except Exception as e:
+        st.warning(f"⚠️ Não foi possível enviar para o Drive, mas arquivo foi salvo localmente: {file_path}")
+        st.caption(f"Erro: {e}")
+        return None
+
+# =============================================================================
+# 📁 GERENCIAMENTO SEGURO DO CSV - BASE DO SISTEMA (CORRIGIDO)
+# =============================================================================
+
+# CORREÇÃO: Caminho absoluto para o CSV na pasta do app
+CSV_PATH = Path(__file__).parent / "dados_colaboradores.csv"
+
+def formatar_cpf(cpf):
+    """Formata CPF removendo caracteres especiais e corrigindo formatação"""
+    if pd.isna(cpf) or cpf == '':
+        return ''
+    
+    # Converte para string e remove caracteres não numéricos
+    cpf_str = str(cpf)
+    # Remove pontos, vírgulas e traços
+    cpf_limpo = re.sub(r'[^\d]', '', cpf_str)
+    
+    # Se tiver 11 dígitos, formata como CPF
+    if len(cpf_limpo) == 11:
+        return f"{cpf_limpo[:3]}.{cpf_limpo[3:6]}.{cpf_limpo[6:9]}-{cpf_limpo[9:]}"
+    # Se tiver mais dígitos, pega os primeiros 11
+    elif len(cpf_limpo) > 11:
+        cpf_limpo = cpf_limpo[:11]
+        return f"{cpf_limpo[:3]}.{cpf_limpo[3:6]}.{cpf_limpo[6:9]}-{cpf_limpo[9:]}"
+    else:
+        return cpf_str
+
+def carregar_csv_colaboradores():
+    """
+    Carrega dados_colaboradores.csv com:
+    - Tratamento de encoding
+    - Tratamento de arquivo aberto
+    - Tratamento de erro
+    """
+    if not CSV_PATH.exists():
+        st.error(f"❌ Arquivo dados_colaboradores.csv não encontrado em: {CSV_PATH}")
+        st.info(f"📁 O arquivo deve estar em: {CSV_PATH}")
+        
+        # Mostra o diretório atual para debug
+        st.caption(f"📂 Diretório atual: {Path.cwd()}")
+        st.caption(f"📂 Diretório do script: {Path(__file__).parent}")
+        
+        return pd.DataFrame()
+
+    try:
+        st.info(f"📂 Carregando arquivo: {CSV_PATH}")
+        
+        # Tentativa com diferentes encodings e separadores
+        try:
+            df = pd.read_csv(CSV_PATH, encoding="utf-8", sep=",")
+        except UnicodeDecodeError:
+            try:
+                df = pd.read_csv(CSV_PATH, encoding="latin1", sep=",")
+            except:
+                df = pd.read_csv(CSV_PATH, encoding="latin1", sep=";")
+        except pd.errors.ParserError:
+            # Se falhar com vírgula, tenta ponto e vírgula
+            df = pd.read_csv(CSV_PATH, encoding="latin1", sep=";")
+
+        # Limpa nomes das colunas
+        df.columns = df.columns.str.strip().str.upper().str.replace(' ', '_')
+        
+        # Mapeia nomes das colunas para o formato esperado pelo sistema
+        mapeamento_colunas = {
+            'TERMO_DE_COLABORAÇÃO': 'TERMO DE COLABORAÇÃO',
+            'TERMO DE COLABORAÇÃO': 'TERMO DE COLABORAÇÃO',
+            'INSTRUMENTO': 'Instrumento',
+            'Nº_TERMO': 'Nº Do Termo de Colaboração',
+            'Nº TERMO': 'Nº Do Termo de Colaboração',
+            'FUNCIONÁRIOS': 'Funcionário',
+            'FUNCIONÁRIO': 'Funcionário',
+            'FUNCIONARIO': 'Funcionário',
+            'NOME': 'Funcionário',
+            'CPF': 'CPF',
+            'CARGO': 'Cargo'
+        }
+        
+        df.rename(columns=mapeamento_colunas, inplace=True)
+        
+        # Formata os CPFs
+        if 'CPF' in df.columns:
+            df['CPF'] = df['CPF'].apply(formatar_cpf)
+        
+        st.success(f"✅ CSV carregado com {len(df)} registros!")
+        return df
+
+    except PermissionError:
+        st.error("❌ O arquivo dados_colaboradores.csv está aberto. Feche-o e tente novamente.")
+        return pd.DataFrame()
+
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar CSV: {e}")
+        return pd.DataFrame()
+
+
+def salvar_csv_colaboradores(df):
+    """
+    Salva CSV com segurança e limpa cache.
+    """
+    try:
+        df.to_csv(CSV_PATH, index=False, encoding="utf-8")
+        st.cache_data.clear()
+        return True
+    except PermissionError:
+        st.error("❌ Feche o arquivo CSV antes de salvar.")
+        return False
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar CSV: {e}")
+        return False
 
 # ============================================================================
 # ✅ DETECTAR AMBIENTE (LOCALHOST vs DEPLOY)
@@ -219,6 +493,9 @@ def salvar_registro_formulario(termo_input, instrumento, numero_termo, funcionar
             for cell in worksheet[1]:
                 cell.font = openpyxl.styles.Font(bold=True)
         
+        # Upload do Excel para o Google Drive (se disponível)
+        upload_to_drive(caminho_excel, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        
         st.success(f"✅ **Excel salvo em**: `{caminho_excel}`")
         return dados_atualizados, novo_registro, nome_recibo_completo
         
@@ -270,19 +547,29 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
         for old_text, new_text in replacements.items():
             for paragraph in doc.paragraphs:
                 if old_text in paragraph.text:
-                    paragraph.text = paragraph.text.replace(old_text, new_text)
+                    # Preserva a formatação substituindo apenas o texto
+                    inline = paragraph.runs
+                    for i in range(len(inline)):
+                        if old_text in inline[i].text:
+                            inline[i].text = inline[i].text.replace(old_text, new_text)
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
                             if old_text in paragraph.text:
-                                paragraph.text = paragraph.text.replace(old_text, new_text)
+                                inline = paragraph.runs
+                                for i in range(len(inline)):
+                                    if old_text in inline[i].text:
+                                        inline[i].text = inline[i].text.replace(old_text, new_text)
         
         doc.save(docx_saida)
         
         if not os.path.exists(docx_saida):
             st.error("❌ **Erro: DOCX não foi criado!**")
             return None, None
+        
+        # Upload do DOCX para o Google Drive (se disponível)
+        upload_to_drive(docx_saida, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         
         st.success(f"✅ **DOCX GERADO**: `{docx_saida.name}`")
         
@@ -291,6 +578,8 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
         if PDF_NATIVE_AVAILABLE:
             pdf_gerado = docx_to_pdf_native(docx_saida, pdf_saida)
             if pdf_gerado:
+                # Upload do PDF para o Google Drive (se disponível)
+                upload_to_drive(pdf_saida, 'application/pdf')
                 st.success(f"✅ **PDF NATIVE (IDÊNTICO DOCX)**: `{pdf_saida.name}`")
         elif not is_deployed():
             # LibreOffice apenas local
@@ -318,6 +607,8 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str):
                     ]
                     result = subprocess.run(cmd, check=True, capture_output=True, timeout=45)
                     if pdf_saida.exists():
+                        # Upload do PDF para o Google Drive (se disponível)
+                        upload_to_drive(pdf_saida, 'application/pdf')
                         st.success(f"✅ **PDF LIBREOFFICE**: `{pdf_saida.name}`")
                         pdf_gerado = True
                 except:
@@ -345,7 +636,7 @@ def gerar_recibos_todos(template_path, pasta_saida_str):
     # ✅ CORREÇÃO 02,03: Usar EXATAMENTE pasta manual
     caminho_excel = Path(pasta_saida_str).absolute() / "registros_completos.xlsx"
     if not os.path.exists(caminho_excel):
-        st.error("❌ **Nenhum registro salvo encontrado em**: `{caminho_excel}`")
+        st.error(f"❌ **Nenhum registro salvo encontrado em**: `{caminho_excel}`")
         return
     
     try:
@@ -394,20 +685,31 @@ def gerar_recibos_todos(template_path, pasta_saida_str):
                 for old_text, new_text in replacements.items():
                     for paragraph in doc.paragraphs:
                         if old_text in paragraph.text:
-                            paragraph.text = paragraph.text.replace(old_text, new_text)
+                            inline = paragraph.runs
+                            for i in range(len(inline)):
+                                if old_text in inline[i].text:
+                                    inline[i].text = inline[i].text.replace(old_text, new_text)
                     for table in doc.tables:
                         for row in table.rows:
                             for cell in row.cells:
                                 for paragraph in cell.paragraphs:
                                     if old_text in paragraph.text:
-                                        paragraph.text = paragraph.text.replace(old_text, new_text)
+                                        inline = paragraph.runs
+                                        for i in range(len(inline)):
+                                            if old_text in inline[i].text:
+                                                inline[i].text = inline[i].text.replace(old_text, new_text)
                 
                 doc.save(docx_saida)
                 docxs_gerados += 1
                 
+                # Upload do DOCX para o Google Drive (se disponível)
+                upload_to_drive(docx_saida, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+                
                 # ✅ CORREÇÃO 01: PDF IDÊNTICO ao DOCX
                 if PDF_NATIVE_AVAILABLE:
                     if docx_to_pdf_native(docx_saida, pdf_saida):
+                        # Upload do PDF para o Google Drive (se disponível)
+                        upload_to_drive(pdf_saida, 'application/pdf')
                         pdfs_gerados += 1
                 
                 progress = (idx + 1) / total_registros
@@ -452,70 +754,169 @@ def extrair_numero_oficio(oficio_completo):
 
 @st.cache_data(ttl=300)
 def carregar_termos_colaboracao():
-    try:
-        df_colab = pd.read_csv("dados_colaboradores.csv")
-        termos = sorted(df_colab['TERMO DE COLABORAÇÃO'].dropna().astype(str).unique())
-        return termos
-    except:
-        return ['TERMO1', 'TERMO2']
+    df = carregar_csv_colaboradores()
+    if df.empty:
+        return []
+
+    # Procura por coluna de termo (case insensitive)
+    coluna_termo = None
+    for col in df.columns:
+        if 'TERMO' in col.upper() and 'COLABORAÇÃO' in col.upper():
+            coluna_termo = col
+            break
+    
+    if not coluna_termo:
+        return []
+
+    return sorted(
+        df[coluna_termo]
+        .dropna()
+        .astype(str)
+        .unique()
+    )
 
 @st.cache_data(ttl=300)
 def buscar_instrumento_por_termo(termo):
-    try:
-        df_colab = pd.read_csv("dados_colaboradores.csv")
-        if len(df_colab.columns) > 2:
-            coluna_termo = df_colab.columns[2]
-            mask = df_colab[coluna_termo] == termo
-            if mask.any():
-                cols_instrumento = ['Instrumento', 'INSTRUMENTO', df_colab.columns[0]]
-                for col in cols_instrumento:
-                    if col in df_colab.columns:
-                        return df_colab.loc[mask, col].iloc[0]
+    df = carregar_csv_colaboradores()
+    if df.empty:
         return ""
-    except:
+
+    # Procura coluna de termo
+    coluna_termo = None
+    for col in df.columns:
+        if 'TERMO' in col.upper() and 'COLABORAÇÃO' in col.upper():
+            coluna_termo = col
+            break
+    
+    if not coluna_termo:
         return ""
+
+    mask = df[coluna_termo] == termo
+    if not mask.any():
+        return ""
+
+    # Procura coluna de instrumento
+    for col in df.columns:
+        if 'INSTRUMENTO' in col.upper():
+            return str(df.loc[mask, col].iloc[0]).strip()
+
+    return ""
 
 @st.cache_data(ttl=300)
 def buscar_numero_termo_por_nome(termo):
-    try:
-        df_colab = pd.read_csv("dados_colaboradores.csv")
-        if len(df_colab.columns) > 1:
-            coluna_numero = df_colab.columns[1]
-            mask = df_colab['TERMO DE COLABORAÇÃO'] == termo
-            if mask.any():
-                return str(df_colab.loc[mask, coluna_numero].iloc[0]).strip()
+    df = carregar_csv_colaboradores()
+    if df.empty:
         return ""
-    except:
+
+    # Procura coluna de termo
+    coluna_termo = None
+    for col in df.columns:
+        if 'TERMO' in col.upper() and 'COLABORAÇÃO' in col.upper():
+            coluna_termo = col
+            break
+    
+    if not coluna_termo:
         return ""
+
+    mask = df[coluna_termo] == termo
+    if not mask.any():
+        return ""
+
+    # Procura coluna de número do termo
+    for col in df.columns:
+        if 'Nº' in col.upper() and 'TERMO' in col.upper():
+            return str(df.loc[mask, col].iloc[0]).strip()
+
+    return ""
 
 @st.cache_data(ttl=300)
 def carregar_funcionarios_por_termo(termo):
-    try:
-        df_colab = pd.read_csv("dados_colaboradores.csv")
-        if len(df_colab.columns) > 6:
-            coluna_oitava = df_colab.columns[6]
-            mask = df_colab['TERMO DE COLABORAÇÃO'] == termo
-            if mask.any():
-                return sorted(df_colab.loc[mask, coluna_oitava].dropna().astype(str).unique())
+    df = carregar_csv_colaboradores()
+    if df.empty:
         return []
-    except:
+
+    # Procura coluna de termo
+    coluna_termo = None
+    for col in df.columns:
+        if 'TERMO' in col.upper() and 'COLABORAÇÃO' in col.upper():
+            coluna_termo = col
+            break
+    
+    if not coluna_termo:
         return []
+
+    mask = df[coluna_termo] == termo
+    if not mask.any():
+        return []
+
+    # Procura coluna de funcionário
+    coluna_func = None
+    for col in df.columns:
+        if 'FUNCIONÁRIOS' in col.upper() or 'FUNCIONÁRIO' in col.upper() or 'FUNCIONARIO' in col.upper() or 'NOME' in col.upper():
+            coluna_func = col
+            break
+
+    if not coluna_func:
+        return []
+
+    return sorted(
+        df.loc[mask, coluna_func]
+        .dropna()
+        .astype(str)
+        .unique()
+    )
 
 @st.cache_data(ttl=300)
 def buscar_cpf_cargo_por_funcionario(termo, funcionario):
-    try:
-        df_colab = pd.read_csv("dados_colaboradores.csv")
-        coluna_oitava = df_colab.columns[6] if len(df_colab.columns) > 6 else None
-        if coluna_oitava:
-            mask = (df_colab['TERMO DE COLABORAÇÃO'] == termo) & (df_colab[coluna_oitava] == funcionario)
-            if mask.any():
-                linha = df_colab.loc[mask].iloc[0]
-                cpf = str(linha.get('CPF', linha.iloc[3] if len(linha) > 3 else '')).strip()
-                cargo = str(linha.get('Cargo', linha.iloc[8] if len(linha) > 8 else '')).strip()
-                return cpf, cargo
+    df = carregar_csv_colaboradores()
+    if df.empty:
         return "", ""
-    except:
+
+    # Procura coluna de termo
+    coluna_termo = None
+    for col in df.columns:
+        if 'TERMO' in col.upper() and 'COLABORAÇÃO' in col.upper():
+            coluna_termo = col
+            break
+
+    if not coluna_termo:
         return "", ""
+
+    # Procura coluna de funcionário
+    coluna_func = None
+    for col in df.columns:
+        if 'FUNCIONÁRIOS' in col.upper() or 'FUNCIONÁRIO' in col.upper() or 'FUNCIONARIO' in col.upper() or 'NOME' in col.upper():
+            coluna_func = col
+            break
+
+    if not coluna_func:
+        return "", ""
+
+    mask = (
+        (df[coluna_termo] == termo) &
+        (df[coluna_func] == funcionario)
+    )
+
+    if not mask.any():
+        return "", ""
+
+    linha = df.loc[mask].iloc[0]
+
+    # Procura CPF
+    cpf = ""
+    for col in df.columns:
+        if 'CPF' in col.upper():
+            cpf = str(linha.get(col, "")).strip()
+            break
+
+    # Procura Cargo
+    cargo = ""
+    for col in df.columns:
+        if 'CARGO' in col.upper():
+            cargo = str(linha.get(col, "")).strip()
+            break
+
+    return cpf, cargo
 
 def formatar_data_completa(data_obj):
     if pd.isna(data_obj) or data_obj == '':
@@ -617,6 +1018,8 @@ if 'funcionario_anterior' not in st.session_state:
     st.session_state.funcionario_anterior = ""
 if 'form_reset' not in st.session_state:
     st.session_state.form_reset = False
+if 'modelo_path' not in st.session_state:
+    st.session_state.modelo_path = None
 
 # ============================================================================
 # DADOS INICIAIS
@@ -644,6 +1047,14 @@ with st.sidebar:
     st.subheader("📂 **IMPORTANTE**")
     ambiente = "🚀 **DEPLOY**" if is_deployed() else "🏠 **LOCALHOST**"
     st.warning(f"{ambiente} - **INFORME A PASTA MANUALMENTE!**")
+    
+    # Mostra o caminho do CSV para debug
+    st.markdown("---")
+    st.caption(f"📁 CSV: {CSV_PATH}")
+    if CSV_PATH.exists():
+        st.success("✅ CSV encontrado!")
+    else:
+        st.error("❌ CSV não encontrado!")
 
 # ============================================================================
 # FORMULÁRIO PRINCIPAL 
@@ -656,7 +1067,7 @@ st.subheader("📝 Novo Registro")
 # Campo pasta manual OBRIGATÓRIO (CORRIGIDA 02)
 pasta_recibos_manual = st.text_input(
     "📂 **PASTA DESTINO (OBRIGATÓRIO)**:", 
-    value="C:/Users/SEU_USUARIO/Desktop/Pagto_Diarias",  # Exemplo Windows
+    value="C:/Users/Vinicius Guanabara/Desktop/Pagto_Diarias",  # Ajustado para seu usuário
     help="Digite o CAMINHO COMPLETO da pasta no seu DESKTOP",
     label_visibility="collapsed"
 )
@@ -765,47 +1176,52 @@ st.subheader("📋 Registros Salvos")
 try:
     if pasta_recibos_manual:
         caminho_excel = Path(pasta_recibos_manual).absolute() / "registros_completos.xlsx"
-        dados_completos = pd.read_excel(caminho_excel)
-        if not dados_completos.empty:
-            st.dataframe(dados_completos, use_container_width=True)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                buffer_excel = io.BytesIO()
-                with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
-                    dados_completos.to_excel(writer, sheet_name='Registros', index=False)
-                buffer_excel.seek(0)
-                st.download_button(
-                    "📥 **Download Excel**", 
-                    buffer_excel.getvalue(), 
-                    f"registros_completos_{datetime.now().strftime('%d%m%Y_%H%M')}.xlsx", 
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-            with col2:
-                if st.button("🗑️ **Limpar Tudo**", type="secondary", use_container_width=True):
-                    colunas_vazias = pd.DataFrame(columns=dados_completos.columns)
-                    colunas_vazias.to_excel(caminho_excel, index=False)
-                    st.success("✅ **Registros limpos!**")
-                    st.rerun()
+        if os.path.exists(caminho_excel):
+            dados_completos = pd.read_excel(caminho_excel)
+            if not dados_completos.empty:
+                st.dataframe(dados_completos, use_container_width=True)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    buffer_excel = io.BytesIO()
+                    with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                        dados_completos.to_excel(writer, sheet_name='Registros', index=False)
+                    buffer_excel.seek(0)
+                    st.download_button(
+                        "📥 **Download Excel**", 
+                        buffer_excel.getvalue(), 
+                        f"registros_completos_{datetime.now().strftime('%d%m%Y_%H%M')}.xlsx", 
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                with col2:
+                    if st.button("🗑️ **Limpar Tudo**", type="secondary", use_container_width=True):
+                        colunas_vazias = pd.DataFrame(columns=dados_completos.columns)
+                        colunas_vazias.to_excel(caminho_excel, index=False)
+                        st.success("✅ **Registros limpos!**")
+                        st.rerun()
+            else:
+                st.info("👆 **Cadastre o primeiro registro!**")
         else:
             st.info("👆 **Cadastre o primeiro registro!**")
     else:
         st.warning("ℹ️ **Informe a pasta primeiro**")
-except FileNotFoundError:
-    st.info("👆 **Cadastre o primeiro registro!**")
 except Exception as e:
     st.error(f"❌ Erro: {e}")
 
 # ============================================================================
-# CONFIGURAÇÃO RECIBOS
+# CONFIGURAÇÃO RECIBOS - REMOVIDO UPLOAD MANUAL
 # ============================================================================
 st.markdown("---")
 st.subheader("🖨️ **CONFIGURAÇÃO RECIBOS**")
 
-col_template, col_pasta = st.columns([1, 2])
-with col_template:
-    template_uploaded = st.file_uploader("📄 **Modelo Recibo.docx**", type='docx')
+# Download automático do modelo
+if st.button("📥 **Baixar Modelo do Recibo**", use_container_width=True):
+    with st.spinner("Baixando modelo do Google Drive..."):
+        modelo_path = download_modelo_docx()
+        if modelo_path:
+            st.session_state.modelo_path = modelo_path
+            st.success("✅ Modelo baixado com sucesso!")
 
 # ============================================================================
 # BOTÕES DE AÇÃO
@@ -838,7 +1254,7 @@ with col_acoes1:
     
     with col1_btn2:
         # ✅ GERAR RECIBO ATUAL
-        if st.button("🖨️ **GERAR RECIBO ATUAL**", use_container_width=True) and template_uploaded and pasta_recibos_manual:
+        if st.button("🖨️ **GERAR RECIBO ATUAL**", use_container_width=True) and st.session_state.modelo_path and pasta_recibos_manual:
             if all([termo_input, funcionario_input, cpf]):
                 dados_registro = {
                     'Termo de Colaboração': termo_input or '',
@@ -862,21 +1278,18 @@ with col_acoes1:
                     'Nome do Recibo': nome_recibo
                 }
                 
-                with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_template:
-                    tmp_template.write(template_uploaded.read())
-                    template_path = tmp_template.name
-                
-                pdf_gerado, docx_gerado = gerar_recibo_individual(dados_registro, template_path, pasta_recibos_manual)
+                pdf_gerado, docx_gerado = gerar_recibo_individual(dados_registro, st.session_state.modelo_path, pasta_recibos_manual)
                 if pdf_gerado and docx_gerado:
                     st.success(f"✅ **PDF + DOCX GERADOS na pasta informada!**")
                     st.balloons()
                 elif docx_gerado:
                     st.success(f"✅ **DOCX GERADO na pasta informada!**")
-                os.unlink(template_path)
             else:
                 st.error("❌ **Preencha Termo, Funcionário e CPF primeiro!**")
         elif not pasta_recibos_manual:
             st.error("❌ **Informe a pasta primeiro!**")
+        elif not st.session_state.modelo_path:
+            st.error("❌ **Baixe o modelo primeiro!**")
 
 with col_acoes2:
     col2_btn1, col2_btn2 = st.columns(2)
@@ -890,17 +1303,14 @@ with col_acoes2:
 
 with col_acoes3:
     # ✅ GERAR TODOS
-    if template_uploaded and pasta_recibos_manual and st.button("🖨️ **GERAR TODOS OS RECIBOS** 🔥", type="primary", use_container_width=True):
-        with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_template:
-            tmp_template.write(template_uploaded.read())
-            template_path = tmp_template.name
-        
-        gerar_recibos_todos(template_path, pasta_recibos_manual)
-        os.unlink(template_path)
+    if st.session_state.modelo_path and pasta_recibos_manual and st.button("🖨️ **GERAR TODOS OS RECIBOS** 🔥", type="primary", use_container_width=True):
+        gerar_recibos_todos(st.session_state.modelo_path, pasta_recibos_manual)
         st.balloons()
         st.rerun()
     elif not pasta_recibos_manual:
         st.error("❌ **Informe a pasta primeiro!**")
+    elif not st.session_state.modelo_path:
+        st.error("❌ **Baixe o modelo primeiro!**")
 
     # ✅ ABRIR PASTA
     if st.button("📂 **Abrir Pasta**", use_container_width=True):
@@ -940,18 +1350,22 @@ st.subheader("📊 Resumo")
 try:
     if pasta_recibos_manual:
         caminho_excel = Path(pasta_recibos_manual).absolute() / "registros_completos.xlsx"
-        dados_completos = pd.read_excel(caminho_excel)
-        total_registros = len(dados_completos)
-        st.metric("📋 Total Registros", f"{total_registros:,}")
-        
-        if total_registros > 0:
-            valores_limpos = dados_completos['Valor'].str.replace('R$', '').str.replace('.', '').str.replace(',', '.').astype(float)
-            st.metric("💰 Total Valor", f"R$ {valores_limpos.sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+        if os.path.exists(caminho_excel):
+            dados_completos = pd.read_excel(caminho_excel)
+            total_registros = len(dados_completos)
+            st.metric("📋 Total Registros", f"{total_registros:,}")
+            
+            if total_registros > 0 and 'Valor' in dados_completos.columns:
+                valores_limpos = dados_completos['Valor'].str.replace('R$', '').str.replace('.', '').str.replace(',', '.').astype(float)
+                st.metric("💰 Total Valor", f"R$ {valores_limpos.sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
+        else:
+            st.metric("📋 Total Registros", "0")
     else:
         st.metric("📋 Total Registros", "0")
-except:
+except Exception as e:
     st.metric("📋 Total Registros", "0")
+    st.caption(f"Debug: {e}")
 
 st.markdown("---")
-st.caption("✅ **CÓDIGO CORRIGIDO: 3 PROBLEMAS RESOLVIDOS**")
-st.caption("🔧 **01** PDF idêntico DOCX | **02** Pasta manual Desktop | **03** Deploy força pasta usuário")
+st.caption("✅ **CÓDIGO CORRIGIDO: 5 PROBLEMAS RESOLVIDOS**")
+st.caption("🔧 **01** PDF idêntico DOCX | **02** Pasta manual Desktop | **03** Deploy força pasta usuário | **04** Caminho CSV corrigido | **05** Modelo automático do Google Drive (com fallback)")
