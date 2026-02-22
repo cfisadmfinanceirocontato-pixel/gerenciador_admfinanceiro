@@ -778,7 +778,7 @@ def resetar_formulario():
 # CONFIGURAÇÃO DA APLICAÇÃO
 # ============================================================================
 st.set_page_config(
-    page_title="Pagto Diárias - Híbrido", 
+    page_title="Gerar Recibos de Diarias", 
     page_icon="📋", 
     layout="wide"
 )
@@ -870,7 +870,7 @@ if not st.session_state.template_path:
 # ============================================================================
 # FORMULÁRIO PRINCIPAL
 # ============================================================================
-st.title("📋 Pagamento de Diárias - Sistema Híbrido")
+st.title("📋 Gerar Recibos de Diárias")
 st.markdown("---")
 
 st.subheader("📝 Novo Registro")
