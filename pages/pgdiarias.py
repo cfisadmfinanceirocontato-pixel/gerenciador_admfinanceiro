@@ -24,6 +24,7 @@ import gdown
 import zipfile
 import time
 import base64
+import traceback
 
 # =============================================================================
 # 🌐 DETECTAR AMBIENTE (LOCALHOST vs STREAMLIT CLOUD)
@@ -599,6 +600,104 @@ def salvar_registro_formulario(termo_input, instrumento, numero_termo, funcionar
         return None, None, None, None
 
 # ============================================================================
+# ✅ FUNÇÕES PARA GERENCIAR REGISTROS (EDITAR, EXCLUIR)
+# ============================================================================
+def carregar_registros():
+    """Carrega os registros do arquivo Excel"""
+    excel_path = PASTA_BASE / "registros_completos.xlsx"
+    if excel_path.exists():
+        try:
+            df = pd.read_excel(excel_path)
+            return df
+        except:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+def salvar_registros(df):
+    """Salva o DataFrame no arquivo Excel"""
+    excel_path = PASTA_BASE / "registros_completos.xlsx"
+    try:
+        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Registros', index=False)
+            
+            # Ajusta largura das colunas
+            worksheet = writer.sheets['Registros']
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = get_column_letter(column[0].column)
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+        return True
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar registros: {e}")
+        return False
+
+def editar_registro(index, dados_editados):
+    """
+    Edita um registro existente no arquivo Excel
+    """
+    df = carregar_registros()
+    if df.empty or index >= len(df):
+        st.error("❌ Registro não encontrado para edição")
+        return False
+    
+    try:
+        # Atualiza o registro no índice especificado
+        for coluna, valor in dados_editados.items():
+            if coluna in df.columns:
+                df.at[index, coluna] = valor
+        
+        # Salva o DataFrame atualizado
+        return salvar_registros(df)
+    except Exception as e:
+        st.error(f"❌ Erro ao editar registro: {e}")
+        return False
+
+def excluir_registro(index):
+    """
+    Exclui um registro específico do arquivo Excel
+    """
+    df = carregar_registros()
+    if df.empty or index >= len(df):
+        st.error("❌ Registro não encontrado para exclusão")
+        return False
+    
+    try:
+        # Remove o registro no índice especificado
+        df = df.drop(index).reset_index(drop=True)
+        
+        # Salva o DataFrame atualizado
+        return salvar_registros(df)
+    except Exception as e:
+        st.error(f"❌ Erro ao excluir registro: {e}")
+        return False
+
+def excluir_todos_registros():
+    """
+    Exclui todos os registros do arquivo Excel
+    """
+    excel_path = PASTA_BASE / "registros_completos.xlsx"
+    try:
+        if excel_path.exists():
+            # Cria um backup antes de excluir (opcional)
+            backup_path = PASTA_BASE / f"backup_registros_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            shutil.copy2(excel_path, backup_path)
+            
+            # Exclui o arquivo
+            excel_path.unlink()
+            return True, backup_path
+        return True, None
+    except Exception as e:
+        st.error(f"❌ Erro ao excluir todos os registros: {e}")
+        return False, None
+
+# ============================================================================
 # ✅ FUNÇÃO GERAR TODOS OS RECIBOS
 # ============================================================================
 def gerar_todos_recibos(template_path, gerar_pdf=False):
@@ -792,6 +891,14 @@ if 'funcionario_anterior' not in st.session_state:
     st.session_state.funcionario_anterior = ""
 if 'template_path' not in st.session_state:
     st.session_state.template_path = None
+if 'modo_edicao' not in st.session_state:
+    st.session_state.modo_edicao = False
+if 'indice_edicao' not in st.session_state:
+    st.session_state.indice_edicao = None
+if 'confirmar_exclusao' not in st.session_state:
+    st.session_state.confirmar_exclusao = False
+if 'indice_excluir' not in st.session_state:
+    st.session_state.indice_excluir = None
 
 # ============================================================================
 # INICIALIZAÇÃO
@@ -808,7 +915,7 @@ if not st.session_state.template_path:
 # ============================================================================
 with st.sidebar:
     st.header("🔍 Filtros")
-    termo_filtro = st.selectbox("Filtrar por Termo:", ['Todos'] + termos_unicos)
+    termo_filtro = st.selectbox("Filtrar por Termo:", ['Todos'] + termos_unicos, key="sidebar_filtro_termo")
     
     st.markdown("---")
     st.subheader("📄 **Contador Recibo**")
@@ -839,7 +946,7 @@ with st.sidebar:
             st.error(f"❌ CSV não encontrado")
     
     # Botão para criar ZIP de todos os arquivos
-    if st.button("📦 **Criar ZIP de todos os arquivos**", use_container_width=True):
+    if st.button("📦 **Criar ZIP de todos os arquivos**", use_container_width=True, key="sidebar_btn_zip"):
         with st.spinner("Criando arquivo ZIP..."):
             zip_path = PASTA_BASE / "todos_arquivos.zip"
             with zipfile.ZipFile(zip_path, 'w') as zipf:
@@ -855,7 +962,7 @@ with st.sidebar:
                 zip_data,
                 file_name="pagamento_diarias.zip",
                 mime="application/zip",
-                key="download_zip"
+                key="sidebar_download_zip"
             )
 
 # ============================================================================
@@ -863,7 +970,7 @@ with st.sidebar:
 # ============================================================================
 if not st.session_state.template_path:
     st.error("❌ Template não disponível. Verifique sua conexão.")
-    if st.button("🔄 Tentar novamente"):
+    if st.button("🔄 Tentar novamente", key="btn_tentar_novamente"):
         st.rerun()
     st.stop()
 
@@ -878,7 +985,7 @@ st.subheader("📝 Novo Registro")
 # Dados do Termo
 st.markdown("**📋 Dados do Termo**")
 # A lista suspensa do campo Termo de Colaboração busca as informações contidas na terceira coluna do arquivo dados_colaboradores.csv
-termo_input = st.selectbox(" **Termo de Colaboração**:", options=[''] + termos_unicos, index=0)
+termo_input = st.selectbox(" **Termo de Colaboração**:", options=[''] + termos_unicos, index=0, key="form_termo")
 
 # Busca automática do número do termo quando um termo é selecionado
 if termo_input:
@@ -890,14 +997,14 @@ else:
 
 col_termo_inst = st.columns([1, 1])
 with col_termo_inst[0]:
-    instrumento = st.text_input(" **Instrumento**:", value=instrumento_auto)
+    instrumento = st.text_input(" **Instrumento**:", value=instrumento_auto, key="form_instrumento")
 with col_termo_inst[1]:
-    numero_termo = st.text_input(" **Nº Do Termo de Colaboração**:", value=numero_termo_auto)
+    numero_termo = st.text_input(" **Nº Do Termo de Colaboração**:", value=numero_termo_auto, key="form_num_termo")
 
 # Dados do Funcionário
 st.markdown("**👤 Dados do Funcionário**")
 funcionarios_do_termo = carregar_funcionarios_por_termo(termo_input)
-funcionario_input = st.selectbox("👤 **Funcionário**", options=[''] + funcionarios_do_termo, index=0)
+funcionario_input = st.selectbox("👤 **Funcionário**", options=[''] + funcionarios_do_termo, index=0, key="form_funcionario")
 
 if st.session_state.funcionario_anterior != funcionario_input:
     resetar_contador_funcionario(st.session_state.funcionario_anterior, funcionario_input)
@@ -909,65 +1016,65 @@ if termo_input and funcionario_input:
 
 col_func_cpf = st.columns([1, 1])
 with col_func_cpf[0]:
-    cpf = st.text_input("🆔 **CPF**:", value=cpf_auto)
+    cpf = st.text_input("🆔 **CPF**:", value=cpf_auto, key="form_cpf")
 with col_func_cpf[1]:
-    cargo = st.text_input("💼 **Cargo**:", value=cargo_auto)
+    cargo = st.text_input("💼 **Cargo**:", value=cargo_auto, key="form_cargo")
 
 # Valores e Data
 st.markdown("**💰 Valores e Data**")
 col_qtd_valor = st.columns([1, 1])
 with col_qtd_valor[0]:
     st.markdown("**🔢 Quantidade**")
-    qtd = st.selectbox("Quantidade:", options=opcoes_quantidade, index=2)
+    qtd = st.selectbox("Quantidade:", options=opcoes_quantidade, index=2, key="form_qtd")
     qtd_extenso = quantidade_por_extenso(qtd)
-    st.text_input("Quantidade por extenso:", value=qtd_extenso, disabled=True)
+    st.text_input("Quantidade por extenso:", value=qtd_extenso, disabled=True, key="form_qtd_extenso")
 
 with col_qtd_valor[1]:
     st.markdown("**💰 Valor**")
     qtd_num = float(qtd.replace(',', '.'))
     valor = formatar_moeda(qtd_num * 140)
-    st.text_input("Valor:", value=valor, disabled=True)
+    st.text_input("Valor:", value=valor, disabled=True, key="form_valor")
     valor_extenso = valor_por_extenso(valor)
-    st.text_input("Valor por extenso:", value=valor_extenso, disabled=True)
+    st.text_input("Valor por extenso:", value=valor_extenso, disabled=True, key="form_valor_extenso")
 
 col_data_recibo, col_data_extenso = st.columns([1, 1])
 with col_data_recibo:
     st.markdown("**📅 Data Recibo**")
-    data_recibo = st.date_input("", value=datetime.now().date(), format="DD/MM/YYYY")
+    data_recibo = st.date_input("", value=datetime.now().date(), format="DD/MM/YYYY", key="form_data_recibo")
     data_input = formatar_data_csv(data_recibo)
 
 with col_data_extenso:
     st.markdown("**📄 Data por Extenso**")
     data_extenso_display = formatar_data_completa(data_recibo)
-    st.text_input("", value=data_extenso_display, disabled=True)
+    st.text_input("", value=data_extenso_display, disabled=True, key="form_data_extenso")
 
 # Detalhes da Viagem
 st.markdown("**📋 Detalhes da Viagem**")
-objetivo = st.text_area("🎯 **Objetivo**:", height=50)
-localidades = st.text_area("📍 **Localidades**:", height=50)
+objetivo = st.text_area("🎯 **Objetivo**:", height=50, key="form_objetivo")
+localidades = st.text_area("📍 **Localidades**:", height=50, key="form_localidades")
 
 # Campos Obrigatórios
 st.markdown("**📄 Campos Obrigatórios**")
 col_periodo_oficio_arquivo = st.columns([1.5, 2, 1.2, 1.2, 1.1])
 
 with col_periodo_oficio_arquivo[0]:
-    periodo = st.text_input("📊 **Período**:", placeholder="01/02 a 03/02")
+    periodo = st.text_input("📊 **Período**:", placeholder="01/02 a 03/02", key="form_periodo")
 
 with col_periodo_oficio_arquivo[1]:
-    oficio = st.text_input("📋 **Ofício**:", placeholder="123/2026/PGF")
+    oficio = st.text_input("📋 **Ofício**:", placeholder="123/2026/PGF", key="form_oficio")
 
 with col_periodo_oficio_arquivo[2]:
     nome_arquivo_auto = funcionario_input.split()[0] if funcionario_input else ""
-    nome_arquivo = st.text_input("📁 **Nome Arquivo**:", value=nome_arquivo_auto)
+    nome_arquivo = st.text_input("📁 **Nome Arquivo**:", value=nome_arquivo_auto, key="form_nome_arquivo")
 
 with col_periodo_oficio_arquivo[3]:
     numero_oficio_auto = extrair_numero_oficio(oficio)
-    numero_oficio_input = st.text_input("📄 **Nº do Ofício**:", value=numero_oficio_auto)
+    numero_oficio_input = st.text_input("📄 **Nº do Ofício**:", value=numero_oficio_auto, key="form_num_oficio")
 
 nome_recibo_auto = f"{nome_arquivo}_{numero_oficio_input}_{st.session_state.contador_recibo}" if nome_arquivo and numero_oficio_input else ""
 
 with col_periodo_oficio_arquivo[4]:
-    nome_recibo = st.text_input("📄 **Nome do Recibo**:", value=nome_recibo_auto)
+    nome_recibo = st.text_input("📄 **Nome do Recibo**:", value=nome_recibo_auto, key="form_nome_recibo")
 
 # ============================================================================
 # BOTÕES DE AÇÃO
@@ -980,7 +1087,7 @@ if is_windows_local() and WIN32_AVAILABLE:
     col_acoes = st.columns([1, 1, 1, 1])
     
     with col_acoes[0]:
-        if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True):
+        if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True, key="btn_salvar_registro"):
             if not all([termo_input, funcionario_input, cpf]):
                 st.error("❌ **Preencha Termo, Funcionário e CPF!**")
             else:
@@ -996,7 +1103,7 @@ if is_windows_local() and WIN32_AVAILABLE:
                     st.rerun()
     
     with col_acoes[1]:
-        if st.button("🖨️ **GERAR DOCX**", use_container_width=True):
+        if st.button("🖨️ **GERAR DOCX**", use_container_width=True, key="btn_gerar_docx"):
             if not all([termo_input, funcionario_input, cpf]):
                 st.error("❌ **Preencha Termo, Funcionário e CPF!**")
             else:
@@ -1027,7 +1134,7 @@ if is_windows_local() and WIN32_AVAILABLE:
                     st.info(f"📁 **Salvo em:** {PASTA_BASE}")
     
     with col_acoes[2]:
-        if st.button("📄 **GERAR DOCX + PDF**", use_container_width=True):
+        if st.button("📄 **GERAR DOCX + PDF**", use_container_width=True, key="btn_gerar_docx_pdf"):
             if not all([termo_input, funcionario_input, cpf]):
                 st.error("❌ **Preencha Termo, Funcionário e CPF!**")
             else:
@@ -1058,7 +1165,7 @@ if is_windows_local() and WIN32_AVAILABLE:
                     st.info(f"📁 **Arquivos em:** {PASTA_BASE}")
     
     with col_acoes[3]:
-        if st.button("🔄 **INCREMENTAR**", use_container_width=True, on_click=incrementar_contador):
+        if st.button("🔄 **INCREMENTAR**", use_container_width=True, on_click=incrementar_contador, key="btn_incrementar"):
             st.success(f"✅ **Contador**: {st.session_state.contador_recibo}")
     
 else:
@@ -1066,7 +1173,7 @@ else:
     col_acoes = st.columns([1, 1, 1])
     
     with col_acoes[0]:
-        if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True):
+        if st.button("💾 **SALVAR REGISTRO**", type="primary", use_container_width=True, key="btn_salvar_registro_cloud"):
             if not all([termo_input, funcionario_input, cpf]):
                 st.error("❌ **Preencha Termo, Funcionário e CPF!**")
             else:
@@ -1082,7 +1189,7 @@ else:
                     st.rerun()
     
     with col_acoes[1]:
-        if st.button("🖨️ **GERAR DOCX**", use_container_width=True):
+        if st.button("🖨️ **GERAR DOCX**", use_container_width=True, key="btn_gerar_docx_cloud"):
             if not all([termo_input, funcionario_input, cpf]):
                 st.error("❌ **Preencha Termo, Funcionário e CPF!**")
             else:
@@ -1113,7 +1220,7 @@ else:
                     st.info(f"📁 **Salvo em:** {PASTA_BASE}")
     
     with col_acoes[2]:
-        if st.button("🔄 **INCREMENTAR**", use_container_width=True, on_click=incrementar_contador):
+        if st.button("🔄 **INCREMENTAR**", use_container_width=True, on_click=incrementar_contador, key="btn_incrementar_cloud"):
             st.success(f"✅ **Contador**: {st.session_state.contador_recibo}")
 
 # ============================================================================
@@ -1126,29 +1233,29 @@ if is_windows_local() and WIN32_AVAILABLE:
     col_lote1, col_lote2, col_lote3 = st.columns(3)
     
     with col_lote1:
-        if st.button("📑 **GERAR TODOS DOCX**", use_container_width=True):
+        if st.button("📑 **GERAR TODOS DOCX**", use_container_width=True, key="btn_todos_docx"):
             gerar_todos_recibos(st.session_state.template_path, gerar_pdf=False)
     
     with col_lote2:
-        if st.button("🖨️ **GERAR TODOS DOCX + PDF**", use_container_width=True):
+        if st.button("🖨️ **GERAR TODOS DOCX + PDF**", use_container_width=True, key="btn_todos_docx_pdf"):
             gerar_todos_recibos(st.session_state.template_path, gerar_pdf=True)
     
     with col_lote3:
-        if st.button("🔄 **RESETAR FORMULÁRIO**", use_container_width=True):
+        if st.button("🔄 **RESETAR FORMULÁRIO**", use_container_width=True, key="btn_resetar_form"):
             resetar_formulario()
 else:
     col_lote1, col_lote2 = st.columns(2)
     
     with col_lote1:
-        if st.button("📑 **GERAR TODOS DOCX**", use_container_width=True):
+        if st.button("📑 **GERAR TODOS DOCX**", use_container_width=True, key="btn_todos_docx_cloud"):
             gerar_todos_recibos(st.session_state.template_path, gerar_pdf=False)
     
     with col_lote2:
-        if st.button("🔄 **RESETAR FORMULÁRIO**", use_container_width=True):
+        if st.button("🔄 **RESETAR FORMULÁRIO**", use_container_width=True, key="btn_resetar_form_cloud"):
             resetar_formulario()
 
 # ============================================================================
-# REGISTROS SALVOS
+# REGISTROS SALVOS - COM FUNÇÕES DE EDIÇÃO E EXCLUSÃO (CORRIGIDO)
 # ============================================================================
 st.markdown("---")
 st.subheader("📋 Registros Salvos")
@@ -1158,31 +1265,292 @@ if excel_path.exists():
     try:
         df_existente = pd.read_excel(excel_path)
         if not df_existente.empty:
-            st.dataframe(df_existente, use_container_width=True)
+            # Adiciona uma coluna de ações
+            df_display = df_existente.copy()
             
-            col1, col2 = st.columns(2)
+            # Cria coluna de seleção para edição/exclusão
+            st.markdown("### 📋 Lista de Registros")
+            
+            # Filtro por termo (opcional)
+            if termo_filtro != 'Todos':
+                df_filtrado = df_display[df_display['Termo de Colaboração'] == termo_filtro]
+                if df_filtrado.empty:
+                    st.info(f"Nenhum registro encontrado para o termo: {termo_filtro}")
+                    df_filtrado = df_display
+            else:
+                df_filtrado = df_display
+            
+            # Exibe a tabela com índice selecionável
+            st.dataframe(df_filtrado, use_container_width=True)
+            
+            # Métricas
+            col1, col2, col3 = st.columns(3)
             with col1:
-                total = len(df_existente)
+                total = len(df_filtrado)
                 st.metric("📋 Total Registros", total)
             
             with col2:
-                if 'Valor' in df_existente.columns:
+                if 'Valor' in df_filtrado.columns:
                     try:
-                        valores = df_existente['Valor'].str.replace('R$', '').str.replace('.', '').str.replace(',', '.').astype(float)
+                        valores = df_filtrado['Valor'].str.replace('R$', '').str.replace('.', '').str.replace(',', '.').astype(float)
                         st.metric("💰 Total", f"R$ {valores.sum():,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.'))
                     except:
                         pass
             
-            # Botão de download do Excel
+            with col3:
+                st.metric("📊 Registros Filtrados", len(df_filtrado))
+            
+            st.markdown("---")
+            st.markdown("### 🛠️ Gerenciar Registros")
+            
+            # Criar selects para escolher o registro
+            col_select1, col_select2 = st.columns(2)
+            
+            with col_select1:
+                # Select para edição
+                opcoes_edit = [f"{i} - {df_filtrado.iloc[i]['Nome do Recibo']} - {df_filtrado.iloc[i]['Funcionário']}" 
+                              for i in range(len(df_filtrado))]
+                
+                registro_selecionado_edit = st.selectbox(
+                    "✏️ **Selecione um registro para EDITAR:**", 
+                    options=[''] + opcoes_edit,
+                    key="select_registro_edit_unique"
+                )
+            
+            with col_select2:
+                # Select para exclusão
+                opcoes_excluir = [f"{i} - {df_filtrado.iloc[i]['Nome do Recibo']} - {df_filtrado.iloc[i]['Funcionário']}" 
+                                 for i in range(len(df_filtrado))]
+                
+                registro_selecionado_excluir = st.selectbox(
+                    "🗑️ **Selecione um registro para EXCLUIR:**", 
+                    options=[''] + opcoes_excluir,
+                    key="select_registro_excluir_unique"
+                )
+            
+            # Área de Edição - Só aparece se um registro foi selecionado
+            if registro_selecionado_edit:
+                idx_selecionado_edit = int(registro_selecionado_edit.split(' - ')[0])
+                registro_original = df_filtrado.iloc[idx_selecionado_edit]
+                
+                with st.expander("📝 **EDITAR REGISTRO SELECIONADO**", expanded=True):
+                    with st.form(key="form_editar_registro_unique"):
+                        st.markdown("**📝 Editar Campos**")
+                        
+                        # Campos editáveis
+                        col_edit1, col_edit2 = st.columns(2)
+                        
+                        with col_edit1:
+                            termo_edit = st.text_input("Termo de Colaboração", 
+                                                       value=registro_original.get('Termo de Colaboração', ''),
+                                                       key="edit_termo")
+                            instrumento_edit = st.text_input("Instrumento", 
+                                                            value=registro_original.get('Instrumento', ''),
+                                                            key="edit_instrumento")
+                            numero_termo_edit = st.text_input("Nº Do Termo de Colaboração", 
+                                                             value=registro_original.get('Nº Do Termo de Colaboração', ''),
+                                                             key="edit_num_termo")
+                            funcionario_edit = st.text_input("Funcionário", 
+                                                            value=registro_original.get('Funcionário', ''),
+                                                            key="edit_funcionario")
+                            cpf_edit = st.text_input("CPF", 
+                                                    value=registro_original.get('CPF', ''),
+                                                    key="edit_cpf")
+                            cargo_edit = st.text_input("Cargo", 
+                                                      value=registro_original.get('Cargo', ''),
+                                                      key="edit_cargo")
+                        
+                        with col_edit2:
+                            qtd_edit = st.text_input("Quantidade", 
+                                                    value=registro_original.get('Quantidade', ''),
+                                                    key="edit_qtd")
+                            qtd_extenso_edit = st.text_input("Quantidade por extenso", 
+                                                            value=registro_original.get('Quantidade por extenso', ''),
+                                                            key="edit_qtd_extenso")
+                            valor_edit = st.text_input("Valor", 
+                                                      value=registro_original.get('Valor', ''),
+                                                      key="edit_valor")
+                            valor_extenso_edit = st.text_input("Valor por extenso", 
+                                                              value=registro_original.get('Valor por extenso', ''),
+                                                              key="edit_valor_extenso")
+                            data_recibo_edit = st.text_input("Data Recibo", 
+                                                            value=registro_original.get('Data Recibo', ''),
+                                                            key="edit_data_recibo")
+                            data_extenso_edit = st.text_input("Data por Extenso", 
+                                                             value=registro_original.get('Data por Extenso', ''),
+                                                             key="edit_data_extenso")
+                        
+                        objetivo_edit = st.text_area("Objetivo", 
+                                                     value=registro_original.get('Objetivo', ''),
+                                                     key="edit_objetivo")
+                        localidades_edit = st.text_area("Localidades", 
+                                                        value=registro_original.get('Localidades', ''),
+                                                        key="edit_localidades")
+                        
+                        col_periodo1, col_periodo2, col_periodo3 = st.columns(3)
+                        with col_periodo1:
+                            periodo_edit = st.text_input("Período", 
+                                                        value=registro_original.get('Período', ''),
+                                                        key="edit_periodo")
+                        with col_periodo2:
+                            oficio_edit = st.text_input("Ofício", 
+                                                       value=registro_original.get('Ofício', ''),
+                                                       key="edit_oficio")
+                        with col_periodo3:
+                            nome_recibo_edit = st.text_input("Nome do Recibo", 
+                                                            value=registro_original.get('Nome do Recibo', ''),
+                                                            key="edit_nome_recibo")
+                        
+                        col_edit_btns = st.columns(2)
+                        with col_edit_btns[0]:
+                            submitted = st.form_submit_button("💾 **Salvar Alterações**", type="primary", use_container_width=True)
+                        
+                        with col_edit_btns[1]:
+                            cancelar = st.form_submit_button("❌ **Cancelar**", use_container_width=True)
+                        
+                        if submitted:
+                            # Coletar dados editados
+                            dados_editados = {
+                                'Termo de Colaboração': termo_edit,
+                                'Instrumento': instrumento_edit,
+                                'Nº Do Termo de Colaboração': numero_termo_edit,
+                                'Funcionário': funcionario_edit,
+                                'CPF': cpf_edit,
+                                'Cargo': cargo_edit,
+                                'Quantidade': qtd_edit,
+                                'Quantidade por extenso': qtd_extenso_edit,
+                                'Valor': valor_edit,
+                                'Valor por extenso': valor_extenso_edit,
+                                'Data Recibo': data_recibo_edit,
+                                'Data por Extenso': data_extenso_edit,
+                                'Objetivo': objetivo_edit,
+                                'Localidades': localidades_edit,
+                                'Período': periodo_edit,
+                                'Ofício': oficio_edit,
+                                'Nome do Recibo': nome_recibo_edit
+                            }
+                            
+                            # Encontrar o índice no DataFrame original
+                            df_original = carregar_registros()
+                            
+                            # Encontrar o registro correspondente pelo Nome do Recibo
+                            idx_original = None
+                            nome_recibo_original = registro_original.get('Nome do Recibo', '')
+                            
+                            for i, row in df_original.iterrows():
+                                if row.get('Nome do Recibo') == nome_recibo_original:
+                                    idx_original = i
+                                    break
+                            
+                            if idx_original is not None:
+                                if editar_registro(idx_original, dados_editados):
+                                    st.success("✅ Registro editado com sucesso!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Erro ao editar registro")
+                            else:
+                                st.error("❌ Não foi possível encontrar o registro no arquivo original")
+                        
+                        if cancelar:
+                            st.rerun()
+            
+            # Área de Exclusão Individual - Só aparece se um registro foi selecionado
+            if registro_selecionado_excluir:
+                idx_selecionado_excluir = int(registro_selecionado_excluir.split(' - ')[0])
+                registro_excluir = df_filtrado.iloc[idx_selecionado_excluir]
+                
+                with st.expander("⚠️ **EXCLUIR REGISTRO SELECIONADO**", expanded=True):
+                    st.warning(f"⚠️ Você está prestes a excluir o registro:")
+                    st.info(f"**Nome do Recibo:** {registro_excluir.get('Nome do Recibo', '')}")
+                    st.info(f"**Funcionário:** {registro_excluir.get('Funcionário', '')}")
+                    st.info(f"**Data:** {registro_excluir.get('Data Recibo', '')}")
+                    
+                    col_confirm1, col_confirm2 = st.columns(2)
+                    
+                    with col_confirm1:
+                        if st.button("✅ **Confirmar Exclusão**", type="primary", use_container_width=True, key="btn_confirmar_exclusao_unique"):
+                            # Encontrar o índice no DataFrame original
+                            df_original = carregar_registros()
+                            nome_recibo_excluir = registro_excluir.get('Nome do Recibo', '')
+                            
+                            idx_original = None
+                            for i, row in df_original.iterrows():
+                                if row.get('Nome do Recibo') == nome_recibo_excluir:
+                                    idx_original = i
+                                    break
+                            
+                            if idx_original is not None:
+                                if excluir_registro(idx_original):
+                                    st.success("✅ Registro excluído com sucesso!")
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Erro ao excluir registro")
+                            else:
+                                st.error("❌ Não foi possível encontrar o registro no arquivo original")
+                    
+                    with col_confirm2:
+                        if st.button("❌ **Cancelar**", use_container_width=True, key="btn_cancelar_exclusao_unique"):
+                            st.rerun()
+            
+            st.markdown("---")
+            st.markdown("### ⚠️ Operações em Massa")
+            
+            with st.expander("🗑️ **EXCLUIR TODOS OS REGISTROS**", expanded=False):
+                st.error("⚠️ **ATENÇÃO: Esta ação é irreversível!**")
+                st.warning("Todos os registros serão permanentemente excluídos.")
+                
+                # Opção de backup
+                fazer_backup = st.checkbox("📦 Criar backup antes de excluir", value=True, key="chk_backup_unique")
+                
+                confirmacao = st.text_input("Digite 'CONFIRMAR' para prosseguir:", key="input_confirm_excluir_todos_unique")
+                
+                col_excluir1, col_excluir2 = st.columns(2)
+                
+                with col_excluir1:
+                    if st.button("🗑️ **EXCLUIR TODOS OS REGISTROS**", type="primary", use_container_width=True, 
+                               disabled=(confirmacao != "CONFIRMAR"), key="btn_excluir_todos_unique"):
+                        
+                        sucesso, backup_path = excluir_todos_registros()
+                        
+                        if sucesso:
+                            if backup_path and fazer_backup and backup_path.exists():
+                                st.success(f"✅ Todos os registros foram excluídos com sucesso!")
+                                st.info(f"📦 Backup criado em: {backup_path}")
+                                
+                                # Botão para baixar o backup
+                                with open(backup_path, 'rb') as f:
+                                    st.download_button(
+                                        "📥 **Baixar Backup**",
+                                        f,
+                                        file_name=backup_path.name,
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key="btn_download_backup_unique"
+                                    )
+                            else:
+                                st.success("✅ Todos os registros foram excluídos com sucesso!")
+                            
+                            st.rerun()
+                        else:
+                            st.error("❌ Erro ao excluir todos os registros")
+                
+                with col_excluir2:
+                    if st.button("❌ **Cancelar**", use_container_width=True, key="btn_cancelar_exclusao_todos_unique"):
+                        st.rerun()
+            
+            # Botão de download do Excel (mantido do original)
+            st.markdown("---")
             with open(excel_path, 'rb') as f:
                 st.download_button(
-                    "📥 **Download Excel**",
+                    "📥 **Download Excel Completo**",
                     f,
                     file_name="registros_completos.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="btn_download_excel_unique"
                 )
-    except:
-        st.info("📂 **Arquivo Excel encontrado mas não foi possível ler**")
+                
+    except Exception as e:
+        st.error(f"Erro ao processar registros: {e}")
+        st.error(traceback.format_exc())
 else:
     st.info("👆 **Nenhum registro encontrado. Cadastre o primeiro!**")
 
