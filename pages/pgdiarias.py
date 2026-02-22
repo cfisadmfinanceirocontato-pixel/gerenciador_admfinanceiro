@@ -24,8 +24,6 @@ import gdown
 import zipfile
 import time
 import base64
-import pythoncom
-import win32com.client
 
 # =============================================================================
 # 🌐 DETECTAR AMBIENTE (LOCALHOST vs STREAMLIT CLOUD)
@@ -38,7 +36,8 @@ def is_windows_local():
     """Detecta se é Windows em ambiente local"""
     return platform.system() == "Windows" and not is_streamlit_cloud()
 
-# Tenta importar pywin32 apenas se for Windows local
+# Importações condicionais para Windows local
+WIN32_AVAILABLE = False
 if is_windows_local():
     try:
         import win32api
@@ -46,10 +45,9 @@ if is_windows_local():
         import win32com.client
         import pythoncom
         WIN32_AVAILABLE = True
-    except:
+    except ImportError:
         WIN32_AVAILABLE = False
-else:
-    WIN32_AVAILABLE = False
+        st.warning("⚠️ pywin32 não instalado. A funcionalidade de PDF estará desabilitada. Instale com: pip install pywin32")
 
 # =============================================================================
 # 🌐 CONFIGURAÇÕES
@@ -356,7 +354,8 @@ def buscar_cpf_cargo_por_funcionario(termo, funcionario):
 # ============================================================================
 def print_to_pdf(docx_path):
     """
-    Imprime o documento usando Microsoft Print to PDF
+    Converte DOCX para PDF usando o Microsoft Word (ExportAsFixedFormat)
+    Baseado no código VBA fornecido
     Funciona apenas em Windows local
     """
     if not is_windows_local():
@@ -372,18 +371,18 @@ def print_to_pdf(docx_path):
         # Caminho para o PDF de saída
         pdf_path = docx_path.with_suffix('.pdf')
         
-        # Abre o Word e imprime
+        # Abre o Word
         word_app = win32com.client.Dispatch("Word.Application")
         word_app.Visible = False
         
         # Abre o documento
         doc = word_app.Documents.Open(str(docx_path))
         
-        # Configura a impressão para Microsoft Print to PDF
-        word_app.ActivePrinter = "Microsoft Print to PDF"
-        
-        # Imprime
-        doc.PrintOut(Background=False, Copies=1, OutputFileName=str(pdf_path))
+        # Exporta como PDF (equivalente ao ExportAsFixedFormat do VBA)
+        doc.ExportAsFixedFormat(
+            OutputFileName=str(pdf_path),
+            ExportFormat=17  # wdExportFormatPDF
+        )
         
         # Fecha o documento
         doc.Close()
@@ -406,31 +405,35 @@ def print_to_pdf(docx_path):
         return False, str(e)
 
 # ============================================================================
-# ✅ FUNÇÃO PARA GERAR DOCX (MANTENDO UMA FOLHA)
+# ✅ FUNÇÃO PARA GERAR DOCX - VERSÃO SIMPLIFICADA (RECOMENDADA)
 # ============================================================================
 def gerar_docx_otimizado(dados_registro, template_path):
     """
-    Gera DOCX otimizado para caber em uma única folha
-    Respeitando o formato do modelo original
+    Gera DOCX substituindo placeholders no template
+    Versão simplificada sem dependência da função Cells
     """
     
+    # Mapeamento direto dos placeholders para os valores
     replacements = {
+        "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Termo de Colaboração', '')),
+        "(INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
+        "(Nº DO TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
         "(FUNCIONÁRIO)": str(dados_registro.get('Funcionário', '')),
-        "(CARGO)": str(dados_registro.get('Cargo', '')),
         "(CPF)": str(dados_registro.get('CPF', '')),
-        "(VALOR)": str(dados_registro.get('Valor', '')),
-        "((VALOR POR EXTENSO))": str(dados_registro.get('Valor por extenso', '')),
+        "(CARGO)": str(dados_registro.get('Cargo', '')),
         "(QTD)": str(dados_registro.get('Quantidade', '')),
         "((QTD POR EXTENSO))": str(dados_registro.get('Quantidade por extenso', '')),
-        "(NÚMERO DO INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
-        "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
+        "(VALOR)": str(dados_registro.get('Valor', '')),
+        "((VALOR POR EXTENSO))": str(dados_registro.get('Valor por extenso', '')),
+        "(DATA RECIBO)": str(dados_registro.get('Data Recibo', '')),
+        "(DATA POR EXTENSO)": str(dados_registro.get('Data por Extenso', '')),
         "(OBJETIVO)": str(dados_registro.get('Objetivo', '')),
         "(LOCALIDADES)": str(dados_registro.get('Localidades', '')),
         "(PERÍODO)": str(dados_registro.get('Período', '')),
-        "(OFÍCIO)": str(dados_registro.get('Ofício', '')),
-        "(DATA RECIBO)": str(dados_registro.get('Data por Extenso', ''))
+        "(OFÍCIO)": str(dados_registro.get('Ofício', ''))
     }
     
+    # Nome do arquivo
     nome_arquivo_recibo = dados_registro.get('Nome do Recibo', 'recibo_sem_nome')
     nome_arquivo_recibo = "".join(c for c in nome_arquivo_recibo if c.isalnum() or c in (' ', '-', '_')).rstrip()
     
@@ -441,40 +444,25 @@ def gerar_docx_otimizado(dados_registro, template_path):
         # Carrega o template
         doc = Document(template_path)
         
-        # Remove o texto "MODELO_RECIBO_DIÁRIA" se existir
+        # Substitui placeholders em todos os parágrafos
         for paragraph in doc.paragraphs:
-            if "MODELO_RECIBO_DIÁRIA" in paragraph.text:
-                paragraph.text = paragraph.text.replace("MODELO_RECIBO_DIÁRIA", "")
-        
-        # Ajusta as margens para garantir que tudo caiba em uma página
-        sections = doc.sections
-        for section in sections:
-            section.top_margin = Inches(0.3)
-            section.bottom_margin = Inches(0.3)
-            section.left_margin = Inches(0.3)
-            section.right_margin = Inches(0.3)
-            section.page_height = Inches(11.69)  # A4 height
-            section.page_width = Inches(8.27)    # A4 width
-        
-        # Substitui os placeholders
-        for old_text, new_text in replacements.items():
-            for paragraph in doc.paragraphs:
-                if old_text in paragraph.text:
-                    # Substitui o texto mantendo a formatação original
+            for placeholder, valor in replacements.items():
+                if placeholder in paragraph.text:
+                    # Substitui mantendo a formatação original
                     for run in paragraph.runs:
-                        if old_text in run.text:
-                            run.text = run.text.replace(old_text, new_text)
+                        if placeholder in run.text:
+                            run.text = run.text.replace(placeholder, valor)
         
-        # Processa tabelas
+        # Substitui placeholders em todas as tabelas
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
-                        for old_text, new_text in replacements.items():
-                            if old_text in paragraph.text:
+                        for placeholder, valor in replacements.items():
+                            if placeholder in paragraph.text:
                                 for run in paragraph.runs:
-                                    if old_text in run.text:
-                                        run.text = run.text.replace(old_text, new_text)
+                                    if placeholder in run.text:
+                                        run.text = run.text.replace(placeholder, valor)
         
         # Salva o documento
         doc.save(docx_path)
@@ -516,9 +504,9 @@ def gerar_recibo_individual(dados_registro, template_path, gerar_pdf=False):
         'pdf': None
     }
     
-    # Se solicitou PDF e está em Windows local, tenta imprimir
-    if gerar_pdf and is_windows_local():
-        with st.spinner("🖨️ Gerando PDF via Microsoft Print to PDF..."):
+    # Se solicitou PDF e está em Windows local, tenta gerar
+    if gerar_pdf and is_windows_local() and WIN32_AVAILABLE:
+        with st.spinner("🖨️ Gerando PDF via Microsoft Word..."):
             sucesso, pdf_info = print_to_pdf(Path(docx_path))
             if sucesso:
                 resultado_final['pdf'] = pdf_info
@@ -641,20 +629,22 @@ def gerar_todos_recibos(template_path, gerar_pdf=False):
         for idx, row in df.iterrows():
             try:
                 dados_registro = {
-                    'Funcionário': row.get('Funcionário', ''),
-                    'Cargo': row.get('Cargo', ''),
-                    'CPF': row.get('CPF', ''),
-                    'Valor': row.get('Valor', ''),
-                    'Valor por extenso': row.get('Valor por extenso', ''),
-                    'Quantidade': row.get('Quantidade', ''),
-                    'Quantidade por extenso': row.get('Quantidade por extenso', ''),
+                    'Termo de Colaboração': row.get('Termo de Colaboração', ''),
                     'Instrumento': row.get('Instrumento', ''),
                     'Nº Do Termo de Colaboração': row.get('Nº Do Termo de Colaboração', ''),
+                    'Funcionário': row.get('Funcionário', ''),
+                    'CPF': row.get('CPF', ''),
+                    'Cargo': row.get('Cargo', ''),
+                    'Quantidade': row.get('Quantidade', ''),
+                    'Quantidade por extenso': row.get('Quantidade por extenso', ''),
+                    'Valor': row.get('Valor', ''),
+                    'Valor por extenso': row.get('Valor por extenso', ''),
+                    'Data Recibo': row.get('Data Recibo', ''),
+                    'Data por Extenso': row.get('Data por Extenso', ''),
                     'Objetivo': row.get('Objetivo', ''),
                     'Localidades': row.get('Localidades', ''),
                     'Período': row.get('Período', ''),
                     'Ofício': row.get('Ofício', ''),
-                    'Data por Extenso': row.get('Data por Extenso', ''),
                     'Nome do Recibo': row.get('Nome do Recibo', f'recibo_{idx}')
                 }
                 
@@ -1011,20 +1001,22 @@ if is_windows_local() and WIN32_AVAILABLE:
                 st.error("❌ **Preencha Termo, Funcionário e CPF!**")
             else:
                 dados_registro = {
-                    'Funcionário': funcionario_input,
-                    'Cargo': cargo,
-                    'CPF': cpf,
-                    'Valor': valor,
-                    'Valor por extenso': valor_extenso,
-                    'Quantidade': qtd,
-                    'Quantidade por extenso': qtd_extenso,
+                    'Termo de Colaboração': termo_input,
                     'Instrumento': instrumento,
                     'Nº Do Termo de Colaboração': numero_termo,
+                    'Funcionário': funcionario_input,
+                    'CPF': cpf,
+                    'Cargo': cargo,
+                    'Quantidade': qtd,
+                    'Quantidade por extenso': qtd_extenso,
+                    'Valor': valor,
+                    'Valor por extenso': valor_extenso,
+                    'Data Recibo': data_input,
+                    'Data por Extenso': data_extenso_display,
                     'Objetivo': objetivo,
                     'Localidades': localidades,
                     'Período': periodo,
                     'Ofício': oficio,
-                    'Data por Extenso': data_extenso_display,
                     'Nome do Recibo': nome_recibo
                 }
                 
@@ -1040,20 +1032,22 @@ if is_windows_local() and WIN32_AVAILABLE:
                 st.error("❌ **Preencha Termo, Funcionário e CPF!**")
             else:
                 dados_registro = {
-                    'Funcionário': funcionario_input,
-                    'Cargo': cargo,
-                    'CPF': cpf,
-                    'Valor': valor,
-                    'Valor por extenso': valor_extenso,
-                    'Quantidade': qtd,
-                    'Quantidade por extenso': qtd_extenso,
+                    'Termo de Colaboração': termo_input,
                     'Instrumento': instrumento,
                     'Nº Do Termo de Colaboração': numero_termo,
+                    'Funcionário': funcionario_input,
+                    'CPF': cpf,
+                    'Cargo': cargo,
+                    'Quantidade': qtd,
+                    'Quantidade por extenso': qtd_extenso,
+                    'Valor': valor,
+                    'Valor por extenso': valor_extenso,
+                    'Data Recibo': data_input,
+                    'Data por Extenso': data_extenso_display,
                     'Objetivo': objetivo,
                     'Localidades': localidades,
                     'Período': periodo,
                     'Ofício': oficio,
-                    'Data por Extenso': data_extenso_display,
                     'Nome do Recibo': nome_recibo
                 }
                 
@@ -1093,20 +1087,22 @@ else:
                 st.error("❌ **Preencha Termo, Funcionário e CPF!**")
             else:
                 dados_registro = {
-                    'Funcionário': funcionario_input,
-                    'Cargo': cargo,
-                    'CPF': cpf,
-                    'Valor': valor,
-                    'Valor por extenso': valor_extenso,
-                    'Quantidade': qtd,
-                    'Quantidade por extenso': qtd_extenso,
+                    'Termo de Colaboração': termo_input,
                     'Instrumento': instrumento,
                     'Nº Do Termo de Colaboração': numero_termo,
+                    'Funcionário': funcionario_input,
+                    'CPF': cpf,
+                    'Cargo': cargo,
+                    'Quantidade': qtd,
+                    'Quantidade por extenso': qtd_extenso,
+                    'Valor': valor,
+                    'Valor por extenso': valor_extenso,
+                    'Data Recibo': data_input,
+                    'Data por Extenso': data_extenso_display,
                     'Objetivo': objetivo,
                     'Localidades': localidades,
                     'Período': periodo,
                     'Ofício': oficio,
-                    'Data por Extenso': data_extenso_display,
                     'Nome do Recibo': nome_recibo
                 }
                 
@@ -1195,8 +1191,8 @@ else:
 # ============================================================================
 st.markdown("---")
 st.caption(f"✅ **Arquivos salvos em:** {PASTA_BASE}")
-st.caption("📌 **DOCX otimizado para caber em uma folha**")
+st.caption("📌 **DOCX gerado conforme modelo original**")
 if is_windows_local() and WIN32_AVAILABLE:
-    st.caption("🖨️ **Impressão PDF via Microsoft Print to PDF disponível**")
+    st.caption("🖨️ **PDF gerado via Microsoft Word (ExportAsFixedFormat)**")
 else:
     st.caption("📥 **Download dos arquivos disponível via botão ZIP**")
