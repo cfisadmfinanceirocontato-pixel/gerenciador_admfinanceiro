@@ -34,13 +34,16 @@ def carregar_dados_instrumentos():
         caminhos_possiveis = ['itens_instrumento.csv', './itens_instrumento.csv', 'data/itens_instrumento.csv']
         
         for caminho in caminhos_possiveis:
-            if os.path.exists(caminho):
-                df_instrumentos = pd.read_csv(caminho, dtype=str)
-                # Garantir nomes de colunas padronizados
-                df_instrumentos.columns = [col.strip().upper() for col in df_instrumentos.columns]
-                return df_instrumentos
+            try:
+                if os.path.exists(caminho):
+                    df_instrumentos = pd.read_csv(caminho, dtype=str, encoding='utf-8-sig')
+                    # Garantir nomes de colunas padronizados
+                    df_instrumentos.columns = [col.strip().upper() for col in df_instrumentos.columns]
+                    return df_instrumentos
+            except:
+                continue
         
-        st.error("Arquivo itens_instrumento.csv não encontrado. Verifique se o arquivo está no diretório correto.")
+        # Se não encontrar, criar DataFrame vazio
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Erro ao carregar itens_instrumento.csv: {e}")
@@ -49,12 +52,14 @@ def carregar_dados_instrumentos():
 def salvar_dados_instrumentos(df):
     """Salva os dados no arquivo itens_instrumento.csv"""
     try:
+        # Tentar diferentes caminhos
         caminhos_possiveis = ['itens_instrumento.csv', './itens_instrumento.csv', 'data/itens_instrumento.csv']
         
         for caminho in caminhos_possiveis:
             try:
                 df.to_csv(caminho, index=False, encoding='utf-8-sig')
                 st.success(f"Dados salvos com sucesso em {caminho}!")
+                # Limpar cache para recarregar dados atualizados
                 st.cache_data.clear()
                 return True
             except:
@@ -72,9 +77,12 @@ def carregar_dados_provisionamento():
         caminhos_possiveis = ['provisionamentocd.csv', './provisionamentocd.csv', 'data/provisionamentocd.csv']
         
         for caminho in caminhos_possiveis:
-            if os.path.exists(caminho):
-                df = pd.read_csv(caminho)
-                return df
+            try:
+                if os.path.exists(caminho):
+                    df = pd.read_csv(caminho, encoding='utf-8-sig')
+                    return df
+            except:
+                continue
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Erro ao carregar provisionamentocd.csv: {e}")
@@ -124,12 +132,6 @@ def obter_dados_por_item(instrumento, item):
         return df[(df[primeira_coluna] == instrumento) & (df[quarta_coluna].astype(str) == str(item))]
     return pd.DataFrame()
 
-def obter_valores_unicos_por_coluna(df, numero_coluna):
-    """Obtém valores únicos de uma coluna específica do DataFrame"""
-    if not df.empty and len(df.columns) > numero_coluna:
-        return df.iloc[:, numero_coluna].dropna().unique().tolist()
-    return []
-
 # --- Função para formatar moeda BR ---
 def formatar_moeda_br(valor):
     """Formata valor para Real Brasileiro"""
@@ -170,15 +172,6 @@ def preparar_df_para_dashboard(df):
     if 'VALOR' in df_dash.columns:
         df_dash['VALOR'] = df_dash['VALOR'].apply(converter_moeda_para_float)
     
-    # Converter outras colunas numéricas se existirem
-    for col in df_dash.columns:
-        if col not in ['VALOR', 'NF', 'DATA PGTO']:
-            try:
-                # Tenta converter para float se possível
-                df_dash[col] = pd.to_numeric(df_dash[col], errors='ignore')
-            except:
-                pass
-    
     return df_dash
 
 # --- Funções auxiliares ---
@@ -186,7 +179,7 @@ def preparar_df_para_dashboard(df):
 def carregar_dados_csv(nome_arquivo):
     """Carrega dados do CSV local"""
     try:
-        return pd.read_csv(nome_arquivo, low_memory=False)
+        return pd.read_csv(nome_arquivo, low_memory=False, encoding='utf-8-sig')
     except:
         return pd.DataFrame()
 
@@ -223,7 +216,6 @@ def criar_dashboard(df):
     
     # Verificar se temos a coluna VALOR
     if 'VALOR' not in df_dash.columns:
-        st.warning("Coluna 'VALOR' não encontrada no DataFrame")
         return None
     
     # Calcular totais
@@ -280,16 +272,6 @@ if not st.session_state.df_editavel.empty:
             st.metric("🎯 A Faturar", formatar_moeda_br(dashboard_data['total_a_faturar']))
         with col4: 
             st.metric("📊 Registros", f"{len(st.session_state.df_editavel):,}")
-        
-        # Mostrar valores em debug
-        with st.expander("📊 Valores calculados (debug)"):
-            st.write(f"Total Faturado: R$ {dashboard_data['total_faturado']:.2f}")
-            st.write(f"Total Pago: R$ {dashboard_data['total_pago']:.2f}")
-            st.write(f"Total a Faturar: R$ {dashboard_data['total_a_faturar']:.2f}")
-            
-            # Mostrar primeiras linhas do DataFrame preparado
-            st.write("Primeiras linhas do DataFrame (após conversão):")
-            st.dataframe(dashboard_data['df_dash'][['VALOR', 'STATUS']].head() if 'STATUS' in dashboard_data['df_dash'].columns else dashboard_data['df_dash'][['VALOR']].head())
         
         col_l1, col_l2 = st.columns(2)
         
@@ -634,50 +616,52 @@ with st.sidebar:
 st.subheader("📋 Tabela Completa")
 
 if file_upload is not None:
-    df_upload = pd.read_csv(file_upload)
-    st.session_state.df_editavel = df_upload
-    st.success("✅ Dashboard carregado!")
-    st.rerun()
+    try:
+        df_upload = pd.read_csv(file_upload, encoding='utf-8-sig')
+        # Converter todas as colunas para string para evitar problemas de tipo
+        for col in df_upload.columns:
+            df_upload[col] = df_upload[col].astype(str)
+        st.session_state.df_editavel = df_upload
+        st.success("✅ Dashboard carregado!")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Erro ao carregar arquivo: {e}")
 
 if not st.session_state.df_editavel.empty:
-    # Manter tipos originais para edição
+    # IMPORTANTE: Converter TODAS as colunas para string ANTES de passar para o data_editor
     df_display = st.session_state.df_editavel.copy()
     
-    # Configuração das colunas
+    # Garantir que todas as colunas são strings
+    for col in df_display.columns:
+        df_display[col] = df_display[col].astype(str)
+    
+    # Configuração das colunas - TODAS como TextColumn para evitar problemas de tipo
     config_colunas = {}
     for col in df_display.columns:
-        if col == 'VALOR':
-            config_colunas[col] = st.column_config.TextColumn(
-                col,
-                help="Valor em R$"
-            )
-        elif col == 'NF':
-            config_colunas[col] = st.column_config.TextColumn(
-                col,
-                help="Número da Nota Fiscal"
-            )
-        elif col == 'DATA PGTO':
-            config_colunas[col] = st.column_config.TextColumn(
-                col,
-                help="Data no formato dd/mm/aaaa"
-            )
-        else:
-            config_colunas[col] = st.column_config.TextColumn(col)
+        config_colunas[col] = st.column_config.TextColumn(
+            col,
+            help=f"Campo {col}"
+        )
     
-    # Exibir tabela com data_editor
-    edited_df = st.data_editor(
-        df_display,
-        column_config=config_colunas,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        key="data_editor_principal"
-    )
-    
-    # Atualizar se houver mudanças
-    if not edited_df.equals(st.session_state.df_editavel):
-        st.session_state.df_editavel = edited_df
-        st.rerun()
+    # Exibir tabela com data_editor - usando apenas colunas de texto
+    try:
+        edited_df = st.data_editor(
+            df_display,
+            column_config=config_colunas,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key="data_editor_principal"
+        )
+        
+        # Atualizar se houver mudanças (comparando como strings)
+        if not edited_df.equals(df_display):
+            st.session_state.df_editavel = edited_df
+            st.rerun()
+    except Exception as e:
+        st.error(f"Erro ao exibir tabela: {e}")
+        # Fallback: mostrar tabela estática
+        st.dataframe(df_display, use_container_width=True)
     
     # Botões de ação por linha
     st.subheader("🔄 Ações por Linha")
@@ -696,12 +680,13 @@ if not st.session_state.df_editavel.empty:
     
     with col_acoes[1]:
         if st.button("🗑️ Excluir Linha", use_container_width=True):
-            linha_excluir = st.number_input("Nº da linha para excluir:", min_value=0, max_value=len(st.session_state.df_editavel)-1, step=1, key="input_excluir")
-            if st.button("Confirmar Exclusão", key="btn_confirmar_exclusao"):
-                st.session_state.df_editavel = st.session_state.df_editavel.drop(linha_excluir).reset_index(drop=True)
-                salvar_dados_provisionamento(st.session_state.df_editavel)
-                st.success("Linha excluída com sucesso!")
-                st.rerun()
+            if len(st.session_state.df_editavel) > 0:
+                linha_excluir = st.number_input("Nº da linha para excluir:", min_value=0, max_value=len(st.session_state.df_editavel)-1, step=1, key="input_excluir")
+                if st.button("Confirmar Exclusão", key="btn_confirmar_exclusao"):
+                    st.session_state.df_editavel = st.session_state.df_editavel.drop(linha_excluir).reset_index(drop=True)
+                    salvar_dados_provisionamento(st.session_state.df_editavel)
+                    st.success("Linha excluída com sucesso!")
+                    st.rerun()
     
     with col_acoes[2]:
         if st.button("💾 Salvar no Arquivo", use_container_width=True):
@@ -719,27 +704,31 @@ with st.expander("Gerenciar itens_instrumento.csv"):
         # Converter para string para edição
         df_itens_display = df_itens.astype(str)
         
-        edited_itens = st.data_editor(
-            df_itens_display,
-            use_container_width=True,
-            num_rows="dynamic",
-            key="editor_itens"
-        )
-        
-        col_itens1, col_itens2 = st.columns(2)
-        
-        with col_itens1:
-            if st.button("💾 Salvar Alterações em itens_instrumento.csv", use_container_width=True):
-                if salvar_dados_instrumentos(edited_itens):
-                    st.success("Arquivo itens_instrumento.csv atualizado!")
+        try:
+            edited_itens = st.data_editor(
+                df_itens_display,
+                use_container_width=True,
+                num_rows="dynamic",
+                key="editor_itens"
+            )
+            
+            col_itens1, col_itens2 = st.columns(2)
+            
+            with col_itens1:
+                if st.button("💾 Salvar Alterações em itens_instrumento.csv", use_container_width=True):
+                    if salvar_dados_instrumentos(edited_itens):
+                        st.success("Arquivo itens_instrumento.csv atualizado!")
+                        st.rerun()
+            
+            with col_itens2:
+                if st.button("➕ Adicionar Nova Linha", use_container_width=True):
+                    nova_linha = pd.DataFrame([["" for _ in df_itens.columns]], columns=df_itens.columns)
+                    df_atualizado = pd.concat([df_itens, nova_linha], ignore_index=True)
+                    st.session_state.editor_itens = df_atualizado
                     st.rerun()
-        
-        with col_itens2:
-            if st.button("➕ Adicionar Nova Linha", use_container_width=True):
-                nova_linha = pd.DataFrame([["" for _ in df_itens.columns]], columns=df_itens.columns)
-                df_atualizado = pd.concat([df_itens, nova_linha], ignore_index=True)
-                st.session_state.editor_itens = df_atualizado
-                st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao editar itens: {e}")
+            st.dataframe(df_itens_display, use_container_width=True)
     else:
         st.warning("Arquivo itens_instrumento.csv não encontrado ou vazio")
 
@@ -751,16 +740,22 @@ col_acao1, col_acao2, col_acao3 = st.columns(3)
 
 with col_acao1:
     if st.button("➕ ➕ Nova Linha", type="secondary", use_container_width=True):
-        nova_linha = {}
-        for col in st.session_state.df_editavel.columns:
-            nova_linha[col] = ""
-        st.session_state.df_editavel = pd.concat([st.session_state.df_editavel, pd.DataFrame([nova_linha])], ignore_index=True)
-        st.rerun()
+        if not st.session_state.df_editavel.empty:
+            nova_linha = {}
+            for col in st.session_state.df_editavel.columns:
+                nova_linha[col] = ""
+            st.session_state.df_editavel = pd.concat([st.session_state.df_editavel, pd.DataFrame([nova_linha])], ignore_index=True)
+            st.rerun()
+        else:
+            st.warning("Carregue dados primeiro")
 
 with col_acao2:
     if st.button("💾 Salvar Alterações", type="primary", use_container_width=True):
-        if salvar_dados_provisionamento(st.session_state.df_editavel):
-            st.success("Alterações salvas com sucesso!")
+        if not st.session_state.df_editavel.empty:
+            if salvar_dados_provisionamento(st.session_state.df_editavel):
+                st.success("Alterações salvas com sucesso!")
+        else:
+            st.warning("Não há dados para salvar")
 
 with col_acao3:
     if st.button("🗑️ Limpar Tudo", type="secondary", use_container_width=True):
