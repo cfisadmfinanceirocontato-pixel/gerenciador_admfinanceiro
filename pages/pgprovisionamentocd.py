@@ -4,6 +4,8 @@ import numpy as np
 import io
 from datetime import datetime
 import os
+import re
+import time
 
 # --- Configurações da página ---
 st.set_page_config(
@@ -24,6 +26,30 @@ if 'modo_edicao' not in st.session_state:
     
 if 'linha_editando' not in st.session_state:
     st.session_state.linha_editando = None
+    
+if 'filtros_aplicados' not in st.session_state:
+    st.session_state.filtros_aplicados = {}
+    
+if 'df_original' not in st.session_state:
+    st.session_state.df_original = pd.DataFrame()
+
+if 'instrumento_selecionado' not in st.session_state:
+    st.session_state.instrumento_selecionado = ""
+    
+if 'opcoes_termo' not in st.session_state:
+    st.session_state.opcoes_termo = []
+if 'opcoes_termo_nome' not in st.session_state:
+    st.session_state.opcoes_termo_nome = []
+if 'itens_disponiveis' not in st.session_state:
+    st.session_state.itens_disponiveis = []
+if 'opcoes_descricao' not in st.session_state:
+    st.session_state.opcoes_descricao = []
+    
+if 'preview_trigger' not in st.session_state:
+    st.session_state.preview_trigger = False
+    
+if 'item_selecionado' not in st.session_state:
+    st.session_state.item_selecionado = ""
 
 # --- Funções para carregar e salvar dados dos instrumentos ---
 @st.cache_data(ttl=60)
@@ -138,10 +164,8 @@ def formatar_moeda_br(valor):
     try:
         if pd.isna(valor) or valor == "" or valor is None:
             return "R$ 0,00"
-        # Se já for número, converte direto
         if isinstance(valor, (int, float)):
             return f"R$ {abs(valor):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-        # Se for string, tenta converter
         valor_str = str(valor).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
         valor_float = float(valor_str)
         return f"R$ {abs(valor_float):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
@@ -155,7 +179,6 @@ def converter_moeda_para_float(valor_str):
     try:
         if pd.isna(valor_str) or valor_str == "" or valor_str is None:
             return 0.0
-        # Remove 'R$ ' e substitui vírgula por ponto
         valor_limpo = str(valor_str).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
         return float(valor_limpo)
     except:
@@ -168,7 +191,6 @@ def preparar_df_para_dashboard(df):
     
     df_dash = df.copy()
     
-    # Converter coluna VALOR para float
     if 'VALOR' in df_dash.columns:
         df_dash['VALOR'] = df_dash['VALOR'].apply(converter_moeda_para_float)
     
@@ -191,37 +213,18 @@ def obter_valores_unicos(df, coluna):
         return sorted(valores_str)
     return []
 
-def aplicar_filtros(df, coluna, ordem, valor_filtro=""):
-    """Aplica filtros e ordenações"""
-    df_filtrado = df.copy()
-    
-    if valor_filtro and coluna in df_filtrado.columns:
-        df_filtrado = df_filtrado[df_filtrado[coluna].astype(str).str.contains(valor_filtro, case=False, na=False)]
-    
-    if coluna in df_filtrado.columns:
-        if ordem == "Maior → Menor":
-            df_filtrado = df_filtrado.sort_values(coluna, ascending=False)
-        elif ordem == "Menor → Maior":
-            df_filtrado = df_filtrado.sort_values(coluna, ascending=True)
-    
-    return df_filtrado.reset_index(drop=True)
-
 def criar_dashboard(df):
     """Dashboard com listas completas"""
     if df.empty:
         return None
     
-    # Preparar DataFrame para o dashboard
     df_dash = preparar_df_para_dashboard(df)
     
-    # Verificar se temos a coluna VALOR
     if 'VALOR' not in df_dash.columns:
         return None
     
-    # Calcular totais
     total_faturado = df_dash['VALOR'].sum()
     
-    # Calcular total pago baseado no status
     if 'STATUS' in df_dash.columns:
         total_pago = df_dash[df_dash['STATUS'] == 'PAGA']['VALOR'].sum()
     else:
@@ -229,7 +232,6 @@ def criar_dashboard(df):
     
     total_a_faturar = total_faturado - total_pago
     
-    # Agrupamentos
     if 'Nº DO TERMO' in df_dash.columns:
         termos_total = df_dash.groupby('Nº DO TERMO')['VALOR'].sum().round(2).sort_values(ascending=False)
     else:
@@ -251,6 +253,48 @@ def criar_dashboard(df):
         'col_empresa': 'EMPRESA' if 'EMPRESA' in df_dash.columns else 'Empresa',
         'df_dash': df_dash
     }
+
+# --- Função para atualizar campos baseado no instrumento selecionado ---
+def atualizar_campos_por_instrumento(instrumento):
+    """Atualiza os campos Nº DO TERMO, TERMO DE COLABORAÇÃO, ITEM e DESCRIÇÃO"""
+    if instrumento and instrumento in obter_lista_instrumentos():
+        df_filtrado = obter_dados_por_instrumento(instrumento)
+        
+        if not df_filtrado.empty:
+            if len(df_filtrado.columns) > 1:
+                st.session_state.opcoes_termo = df_filtrado.iloc[:, 1].dropna().unique().tolist()
+            
+            if len(df_filtrado.columns) > 2:
+                st.session_state.opcoes_termo_nome = df_filtrado.iloc[:, 2].dropna().unique().tolist()
+            
+            if len(df_filtrado.columns) > 3:
+                st.session_state.itens_disponiveis = df_filtrado.iloc[:, 3].dropna().unique().tolist()
+            
+            st.session_state.opcoes_descricao = []
+    else:
+        st.session_state.opcoes_termo = []
+        st.session_state.opcoes_termo_nome = []
+        st.session_state.itens_disponiveis = []
+        st.session_state.opcoes_descricao = []
+
+# --- Função para processar valor monetário (sem modificar widget diretamente) ---
+def processar_valor_monetario(valor_input):
+    """Processa o valor digitado e retorna o valor formatado e o float"""
+    if not valor_input:
+        return "R$ 0,00", 0.0
+    
+    # Extrair apenas números
+    numeros = re.sub(r'[^0-9]', '', valor_input)
+    if not numeros:
+        return "R$ 0,00", 0.0
+    
+    # Converter para float
+    valor_float = float(numeros) / 100
+    
+    # Formatar
+    valor_formatado = f"R$ {valor_float:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    
+    return valor_formatado, valor_float
 
 # --- Título ---
 st.title("📊 Provisionamento Custo Direto")
@@ -338,12 +382,38 @@ meses = [
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
 ]
 
+# Verificar se instrumento mudou (fora do form)
+if 'form_instrumento' in st.session_state:
+    instrumento_atual = st.session_state.form_instrumento
+    if instrumento_atual != st.session_state.get('instrumento_anterior', ''):
+        atualizar_campos_por_instrumento(instrumento_atual)
+        st.session_state.instrumento_anterior = instrumento_atual
+        # Simular clique no botão PRÉ-VISUALIZAR
+        st.session_state.preview_trigger = True
+        st.rerun()
+
+# Verificar se item mudou (fora do form)
+if 'form_item' in st.session_state and 'form_instrumento' in st.session_state:
+    item_atual = st.session_state.form_item
+    instrumento_atual = st.session_state.form_instrumento
+    if item_atual != st.session_state.get('item_anterior', '') and instrumento_atual:
+        if item_atual:
+            df_item = obter_dados_por_item(instrumento_atual, item_atual)
+            if not df_item.empty and len(df_item.columns) > 4:
+                st.session_state.opcoes_descricao = df_item.iloc[:, 4].dropna().unique().tolist()
+            else:
+                st.session_state.opcoes_descricao = []
+        st.session_state.item_anterior = item_atual
+        # Simular clique no botão PRÉ-VISUALIZAR
+        st.session_state.preview_trigger = True
+        st.rerun()
+
 # Criar formulário
 with st.form("formulario_provisionamento"):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # Campo 01 - INSTRUMENTO (lista suspensa)
+        # Campo 01 - INSTRUMENTO
         instrumento = st.selectbox(
             "INSTRUMENTO *",
             options=[""] + lista_instrumentos if lista_instrumentos else [""],
@@ -351,30 +421,18 @@ with st.form("formulario_provisionamento"):
         )
     
     with col2:
-        # Campo 02 - Nº DO TERMO (combobox baseado no instrumento)
-        opcoes_termo = []
-        if instrumento and instrumento in lista_instrumentos:
-            df_filtrado = obter_dados_por_instrumento(instrumento)
-            if not df_filtrado.empty and len(df_filtrado.columns) > 1:
-                opcoes_termo = df_filtrado.iloc[:, 1].dropna().unique().tolist()
-        
+        # Campo 02 - Nº DO TERMO
         numero_termo = st.selectbox(
             "Nº DO TERMO *",
-            options=[""] + opcoes_termo if opcoes_termo else [""],
+            options=[""] + st.session_state.opcoes_termo if st.session_state.opcoes_termo else [""],
             key="form_termo"
         )
     
     with col3:
-        # Campo 03 - TERMO DE COLABORAÇÃO (combobox baseado no instrumento)
-        opcoes_termo_nome = []
-        if instrumento and instrumento in lista_instrumentos:
-            df_filtrado = obter_dados_por_instrumento(instrumento)
-            if not df_filtrado.empty and len(df_filtrado.columns) > 2:
-                opcoes_termo_nome = df_filtrado.iloc[:, 2].dropna().unique().tolist()
-        
+        # Campo 03 - TERMO DE COLABORAÇÃO
         termo_colaboracao = st.selectbox(
             "TERMO DE COLABORAÇÃO *",
-            options=[""] + opcoes_termo_nome if opcoes_termo_nome else [""],
+            options=[""] + st.session_state.opcoes_termo_nome if st.session_state.opcoes_termo_nome else [""],
             key="form_termo_nome"
         )
     
@@ -401,44 +459,33 @@ with st.form("formulario_provisionamento"):
     col6, col7 = st.columns(2)
     
     with col6:
-        # Campo 06 - ITEM (baseado no instrumento)
-        itens_disponiveis = []
-        if instrumento and instrumento in lista_instrumentos:
-            df_filtrado = obter_dados_por_instrumento(instrumento)
-            if not df_filtrado.empty and len(df_filtrado.columns) > 3:
-                itens_disponiveis = df_filtrado.iloc[:, 3].dropna().unique().tolist()
-        
+        # Campo 06 - ITEM
         item = st.selectbox(
             "ITEM *",
-            options=[""] + itens_disponiveis,
+            options=[""] + st.session_state.itens_disponiveis if st.session_state.itens_disponiveis else [""],
             key="form_item"
         )
     
     with col7:
-        # Campo 07 - DESCRIÇÃO (combobox baseado no instrumento e item)
-        opcoes_descricao = []
-        if instrumento and item and instrumento in lista_instrumentos:
-            df_filtrado = obter_dados_por_item(instrumento, item)
-            if not df_filtrado.empty and len(df_filtrado.columns) > 4:
-                opcoes_descricao = df_filtrado.iloc[:, 4].dropna().unique().tolist()
-        
+        # Campo 07 - DESCRIÇÃO
         descricao = st.selectbox(
             "DESCRIÇÃO *",
-            options=[""] + opcoes_descricao if opcoes_descricao else [""],
+            options=[""] + st.session_state.opcoes_descricao if st.session_state.opcoes_descricao else [""],
             key="form_descricao"
         )
     
     col8, col9, col10 = st.columns(3)
     
     with col8:
-        # Campo 08 - VALOR (formatado em moeda)
-        valor_str = st.text_input(
+        # Campo 08 - VALOR
+        valor_input = st.text_input(
             "VALOR (R$) *",
             value="R$ 0,00",
-            key="form_valor"
+            key="form_valor_input"
         )
-        # Converter para float
-        valor_float = converter_moeda_para_float(valor_str)
+        
+        # Processar valor
+        valor_formatado, valor_float = processar_valor_monetario(valor_input)
     
     with col9:
         # Campo 09 - NF
@@ -492,7 +539,37 @@ with st.form("formulario_provisionamento"):
     with col_btn3:
         cancel_button = st.form_submit_button("❌ CANCELAR", use_container_width=True)
 
-# --- PRÉ-VISUALIZAÇÃO DOS DADOS ---
+# --- PRÉ-VISUALIZAÇÃO AUTOMÁTICA (triggered por mudanças) ---
+if st.session_state.get('preview_trigger', False) and not submit_button and not save_button and not cancel_button:
+    # Limpar o trigger
+    st.session_state.preview_trigger = False
+    
+    # Executar pré-visualização automática
+    if instrumento and numero_termo and termo_colaboracao and mes_competencia and ano_competencia and item and descricao and empresa:
+        st.subheader("📋 PRÉ-VISUALIZAÇÃO DOS DADOS (Automática)")
+        
+        dados_preview = {
+            "INSTRUMENTO": instrumento,
+            "Nº DO TERMO": numero_termo,
+            "TERMO DE COLABORAÇÃO": termo_colaboracao,
+            "MÊS COMPETÊNCIA": mes_competencia,
+            "ANO COMPETÊNCIA": ano_competencia,
+            "ITEM": item,
+            "DESCRIÇÃO": descricao,
+            "VALOR": valor_float,
+            "NF": nf,
+            "EMPRESA": empresa,
+            "STATUS": status,
+            "DATA PGTO": data_pgto.strftime("%d/%m/%Y") if data_pgto else ""
+        }
+        
+        df_preview = pd.DataFrame([dados_preview])
+        st.dataframe(df_preview, use_container_width=True, hide_index=True)
+        
+        # Armazenar no session_state
+        st.session_state.dados_formulario = dados_preview
+
+# --- PRÉ-VISUALIZAÇÃO MANUAL (botão) ---
 if submit_button:
     st.subheader("📋 PRÉ-VISUALIZAÇÃO DOS DADOS")
     
@@ -542,7 +619,6 @@ if save_button:
         }
         
         if st.session_state.modo_edicao and st.session_state.linha_editando is not None:
-            # Modo edição - atualizar linha existente
             df = st.session_state.df_editavel.copy()
             for col, valor in novo_registro.items():
                 if col in df.columns:
@@ -552,14 +628,12 @@ if save_button:
             st.session_state.modo_edicao = False
             st.session_state.linha_editando = None
         else:
-            # Modo adição - nova linha
             if st.session_state.df_editavel.empty:
                 st.session_state.df_editavel = pd.DataFrame([novo_registro])
             else:
                 st.session_state.df_editavel = pd.concat([st.session_state.df_editavel, pd.DataFrame([novo_registro])], ignore_index=True)
             st.success("Registro adicionado com sucesso!")
         
-        # Salvar no arquivo provisionamentocd.csv
         salvar_dados_provisionamento(st.session_state.df_editavel)
         st.rerun()
 
@@ -581,6 +655,7 @@ with st.sidebar:
         df_local = carregar_dados_provisionamento()
         if not df_local.empty:
             st.session_state.df_editavel = df_local
+            st.session_state.df_original = df_local.copy()
             st.success(f"✅ {len(df_local)} linhas!")
             st.rerun()
     
@@ -588,29 +663,40 @@ with st.sidebar:
     colunas = st.session_state.df_editavel.columns.tolist() if not st.session_state.df_editavel.empty else []
     
     if colunas:
-        coluna_filtro = st.selectbox("🎯 Coluna:", ["-- Todas --"] + colunas)
-        if coluna_filtro != "-- Todas --":
+        coluna_filtro = st.selectbox("🎯 Coluna para filtrar:", ["-- Selecione --"] + colunas)
+        
+        if coluna_filtro != "-- Selecione --":
             valores_unicos = obter_valores_unicos(st.session_state.df_editavel, coluna_filtro)
-            valor_filtro = st.selectbox("📋 Selecionar:", ["-- Todos --"] + valores_unicos[:50])
             
-            ordem = st.selectbox("📊 Ordem:", ["Maior → Menor", "Menor → Maior"])
+            valores_selecionados = st.multiselect(
+                f"📋 Valores em {coluna_filtro}:",
+                options=valores_unicos[:100],
+                default=[]
+            )
             
-            if st.button("🚀 FILTRAR", type="primary"):
-                if valor_filtro != "-- Todos --":
+            if st.button("🚀 APLICAR FILTRO", type="primary"):
+                if valores_selecionados:
+                    if st.session_state.df_original.empty:
+                        st.session_state.df_original = st.session_state.df_editavel.copy()
+                    
                     df_filtrado = st.session_state.df_editavel[
-                        st.session_state.df_editavel[coluna_filtro].astype(str).str.contains(valor_filtro, case=False, na=False)
+                        st.session_state.df_editavel[coluna_filtro].astype(str).isin(valores_selecionados)
                     ]
                     
-                    # Aplicar ordenação
-                    if coluna_filtro in df_filtrado.columns:
-                        if ordem == "Maior → Menor":
-                            df_filtrado = df_filtrado.sort_values(coluna_filtro, ascending=False)
-                        elif ordem == "Menor → Maior":
-                            df_filtrado = df_filtrado.sort_values(coluna_filtro, ascending=True)
-                    
                     st.session_state.df_editavel = df_filtrado.reset_index(drop=True)
-                    st.success("✅ Dashboard atualizado!")
+                    st.session_state.filtros_aplicados[coluna_filtro] = valores_selecionados
+                    st.success(f"✅ Filtro aplicado em {coluna_filtro}!")
                     st.rerun()
+        
+        st.markdown("---")
+        if st.button("🧹 LIMPAR TODOS OS FILTROS", type="secondary", use_container_width=True):
+            if not st.session_state.df_original.empty:
+                st.session_state.df_editavel = st.session_state.df_original.copy()
+                st.session_state.filtros_aplicados = {}
+                st.success("✅ Todos os filtros foram removidos!")
+                st.rerun()
+            else:
+                st.warning("Nenhum filtro para limpar")
 
 # --- Tabela Principal ---
 st.subheader("📋 Tabela Completa")
@@ -618,33 +704,41 @@ st.subheader("📋 Tabela Completa")
 if file_upload is not None:
     try:
         df_upload = pd.read_csv(file_upload, encoding='utf-8-sig')
-        # Converter todas as colunas para string para evitar problemas de tipo
         for col in df_upload.columns:
             df_upload[col] = df_upload[col].astype(str)
         st.session_state.df_editavel = df_upload
+        st.session_state.df_original = df_upload.copy()
         st.success("✅ Dashboard carregado!")
         st.rerun()
     except Exception as e:
         st.error(f"Erro ao carregar arquivo: {e}")
 
 if not st.session_state.df_editavel.empty:
-    # IMPORTANTE: Converter TODAS as colunas para string ANTES de passar para o data_editor
     df_display = st.session_state.df_editavel.copy()
     
-    # Garantir que todas as colunas são strings
     for col in df_display.columns:
         df_display[col] = df_display[col].astype(str)
     
-    # Configuração das colunas - TODAS como TextColumn para evitar problemas de tipo
     config_colunas = {}
     for col in df_display.columns:
         config_colunas[col] = st.column_config.TextColumn(
             col,
-            help=f"Campo {col}"
+            help=f"Campo {col}",
+            width="medium"
         )
     
-    # Exibir tabela com data_editor - usando apenas colunas de texto
     try:
+        coluna_para_filtrar = st.selectbox(
+            "🔍 Filtrar tabela por coluna:",
+            ["Selecione uma coluna"] + list(df_display.columns),
+            key="filtro_tabela_coluna"
+        )
+        
+        if coluna_para_filtrar != "Selecione uma coluna":
+            valor_busca = st.text_input(f"Buscar em {coluna_para_filtrar}:", key="filtro_tabela_valor")
+            if valor_busca:
+                df_display = df_display[df_display[coluna_para_filtrar].str.contains(valor_busca, case=False, na=False)]
+        
         edited_df = st.data_editor(
             df_display,
             column_config=config_colunas,
@@ -654,16 +748,13 @@ if not st.session_state.df_editavel.empty:
             key="data_editor_principal"
         )
         
-        # Atualizar se houver mudanças (comparando como strings)
         if not edited_df.equals(df_display):
             st.session_state.df_editavel = edited_df
             st.rerun()
     except Exception as e:
         st.error(f"Erro ao exibir tabela: {e}")
-        # Fallback: mostrar tabela estática
         st.dataframe(df_display, use_container_width=True)
     
-    # Botões de ação por linha
     st.subheader("🔄 Ações por Linha")
     col_acoes = st.columns(5)
     
@@ -701,7 +792,6 @@ with st.expander("Gerenciar itens_instrumento.csv"):
     df_itens = carregar_dados_instrumentos()
     
     if not df_itens.empty:
-        # Converter para string para edição
         df_itens_display = df_itens.astype(str)
         
         try:
@@ -760,6 +850,8 @@ with col_acao2:
 with col_acao3:
     if st.button("🗑️ Limpar Tudo", type="secondary", use_container_width=True):
         st.session_state.df_editavel = pd.DataFrame()
+        st.session_state.df_original = pd.DataFrame()
+        st.session_state.filtros_aplicados = {}
         st.rerun()
 
 # --- Downloads ---

@@ -1,6 +1,6 @@
 """
 Sistema de Pagamento de Diárias - Versão Híbrida
-Funciona em Localhost (com impressão PDF) e Streamlit Cloud (com download)
+CORREÇÕES FOCADAS: Carregamento automático de campos
 """
 
 import streamlit as st
@@ -200,7 +200,7 @@ def carregar_csv_colaboradores():
         return pd.DataFrame()
 
 # ============================================================================
-# ✅ FUNÇÕES DE BUSCA NO CSV
+# ✅ FUNÇÕES DE BUSCA NO CSV (CORRIGIDAS)
 # ============================================================================
 @st.cache_data(ttl=300)
 def carregar_termos_colaboracao():
@@ -222,61 +222,60 @@ def carregar_termos_colaboracao():
     return sorted(termos)
 
 @st.cache_data(ttl=300)
-def buscar_numero_termo_por_termo(termo):
+def buscar_dados_por_termo(termo):
     """
-    Busca o número do termo na coluna específica do CSV
-    O campo Nº Do Termo de Colaboração recebe a informação da coluna Nº TERMO
+    CORRIGIDO: Busca TODOS os dados relacionados a um termo
+    Retorna um dicionário com instrumento e número do termo
     """
     df = carregar_csv_colaboradores()
     if df.empty or not termo:
-        return ""
+        return {"instrumento": "", "numero_termo": ""}
 
     # Encontra a coluna de termo (TERCEIRA COLUNA)
     if len(df.columns) < 3:
-        return ""
+        return {"instrumento": "", "numero_termo": ""}
     
     col_termo = df.columns[2]  # Terceira coluna
-
-    # Encontra a coluna de número do termo (Nº TERMO)
-    col_numero = None
-    for col in df.columns:
-        if 'Nº' in col.upper() or 'NUMERO' in col.upper() or 'N°' in col.upper():
-            col_numero = col
-            break
-    
-    if not col_numero:
-        return ""
 
     # Filtra pelo termo
     mask = df[col_termo].astype(str).str.strip() == str(termo).strip()
     if not mask.any():
-        return ""
+        return {"instrumento": "", "numero_termo": ""}
 
-    # Retorna o número do termo (da coluna Nº TERMO)
-    valor = df.loc[mask, col_numero].iloc[0]
-    return str(valor).strip() if pd.notna(valor) else ""
+    # Pega a primeira linha que corresponde
+    linha = df.loc[mask].iloc[0]
 
-@st.cache_data(ttl=300)
-def buscar_instrumento_por_termo(termo):
-    """Busca o instrumento"""
-    df = carregar_csv_colaboradores()
-    if df.empty or not termo:
-        return ""
-
-    if len(df.columns) < 3:
-        return ""
+    # Busca INSTRUMENTO
+    instrumento = ""
+    for col in df.columns:
+        if col.upper().strip() == 'INSTRUMENTO':
+            instrumento = str(linha[col]).strip() if pd.notna(linha[col]) else ""
+            break
     
-    col_termo = df.columns[2]  # Terceira coluna
+    if not instrumento:  # Se não encontrou com nome exato
+        for col in df.columns:
+            if 'INSTRUMENTO' in col.upper():
+                instrumento = str(linha[col]).strip() if pd.notna(linha[col]) else ""
+                break
 
-    mask = df[col_termo].astype(str).str.strip() == str(termo).strip()
-    if not mask.any():
-        return ""
-
-    if 'INSTRUMENTO' in df.columns:
-        valor = df.loc[mask, 'INSTRUMENTO'].iloc[0]
-        return str(valor).strip() if pd.notna(valor) else ""
+    # Busca Nº DO TERMO
+    numero_termo = ""
+    for col in df.columns:
+        col_upper = col.upper().strip()
+        if 'Nº TERMO' in col_upper or 'N° TERMO' in col_upper or 'NUMERO TERMO' in col_upper:
+            numero_termo = str(linha[col]).strip() if pd.notna(linha[col]) else ""
+            break
     
-    return ""
+    if not numero_termo:  # Se não encontrou, tenta variações
+        for col in df.columns:
+            if ('Nº' in col.upper() or 'NUMERO' in col.upper() or 'N°' in col.upper()) and 'TERMO' in col.upper():
+                numero_termo = str(linha[col]).strip() if pd.notna(linha[col]) else ""
+                break
+
+    return {
+        "instrumento": instrumento,
+        "numero_termo": numero_termo
+    }
 
 @st.cache_data(ttl=300)
 def carregar_funcionarios_por_termo(termo):
@@ -306,17 +305,21 @@ def carregar_funcionarios_por_termo(termo):
     return sorted(df.loc[mask, col_func].dropna().astype(str).unique())
 
 @st.cache_data(ttl=300)
-def buscar_cpf_cargo_por_funcionario(termo, funcionario):
-    """Busca CPF e cargo do funcionário"""
+def buscar_dados_por_funcionario(termo, funcionario):
+    """
+    CORRIGIDO: Busca TODOS os dados de um funcionário
+    Retorna um dicionário com CPF e cargo
+    """
     df = carregar_csv_colaboradores()
     if df.empty or not termo or not funcionario:
-        return "", ""
+        return {"cpf": "", "cargo": ""}
 
     if len(df.columns) < 3:
-        return "", ""
+        return {"cpf": "", "cargo": ""}
     
     col_termo = df.columns[2]  # Terceira coluna
 
+    # Encontra a coluna de funcionário
     col_func = None
     for col in df.columns:
         if 'FUNCIONÁRIO' in col.upper() or 'NOME' in col.upper():
@@ -324,31 +327,50 @@ def buscar_cpf_cargo_por_funcionario(termo, funcionario):
             break
 
     if not col_func:
-        return "", ""
+        return {"cpf": "", "cargo": ""}
 
+    # Filtra pelo termo E funcionário
     mask = (
         (df[col_termo].astype(str).str.strip() == str(termo).strip()) &
         (df[col_func].astype(str).str.strip() == str(funcionario).strip())
     )
 
     if not mask.any():
-        return "", ""
+        return {"cpf": "", "cargo": ""}
 
+    # Pega a primeira linha que corresponde
     linha = df.loc[mask].iloc[0]
 
+    # Busca CPF
     cpf = ""
     for col in df.columns:
-        if 'CPF' in col.upper():
+        if col.upper().strip() == 'CPF':
             cpf = str(linha[col]).strip() if pd.notna(linha[col]) else ""
             break
+    
+    if not cpf:  # Se não encontrou com nome exato
+        for col in df.columns:
+            if 'CPF' in col.upper():
+                cpf = str(linha[col]).strip() if pd.notna(linha[col]) else ""
+                break
 
+    # Busca CARGO
     cargo = ""
     for col in df.columns:
-        if 'CARGO' in col.upper() or 'FUNÇÃO' in col.upper() or 'FUNCAO' in col.upper():
+        if col.upper().strip() == 'CARGO':
             cargo = str(linha[col]).strip() if pd.notna(linha[col]) else ""
             break
+    
+    if not cargo:  # Se não encontrou com nome exato
+        for col in df.columns:
+            if 'CARGO' in col.upper() or 'FUNÇÃO' in col.upper() or 'FUNCAO' in col.upper():
+                cargo = str(linha[col]).strip() if pd.notna(linha[col]) else ""
+                break
 
-    return cpf, cargo
+    return {
+        "cpf": cpf,
+        "cargo": cargo
+    }
 
 # ============================================================================
 # ✅ FUNÇÃO PARA IMPRIMIR PDF (APENAS WINDOWS LOCAL)
@@ -899,6 +921,15 @@ if 'confirmar_exclusao' not in st.session_state:
     st.session_state.confirmar_exclusao = False
 if 'indice_excluir' not in st.session_state:
     st.session_state.indice_excluir = None
+# NOVO: Armazenar valores para controle
+if 'dados_termo_atual' not in st.session_state:
+    st.session_state.dados_termo_atual = {"instrumento": "", "numero_termo": ""}
+if 'dados_funcionario_atual' not in st.session_state:
+    st.session_state.dados_funcionario_atual = {"cpf": "", "cargo": ""}
+if 'ultimo_termo' not in st.session_state:
+    st.session_state.ultimo_termo = ""
+if 'ultimo_funcionario' not in st.session_state:
+    st.session_state.ultimo_funcionario = ""
 
 # ============================================================================
 # INICIALIZAÇÃO
@@ -984,41 +1015,53 @@ st.subheader("📝 Novo Registro")
 
 # Dados do Termo
 st.markdown("**📋 Dados do Termo**")
-# A lista suspensa do campo Termo de Colaboração busca as informações contidas na terceira coluna do arquivo dados_colaboradores.csv
+
+# CORREÇÃO 01: Carregamento automático de Instrumento e Nº do Termo
 termo_input = st.selectbox(" **Termo de Colaboração**:", options=[''] + termos_unicos, index=0, key="form_termo")
 
-# Busca automática do número do termo quando um termo é selecionado
-if termo_input:
-    numero_termo_auto = buscar_numero_termo_por_termo(termo_input)
-    instrumento_auto = buscar_instrumento_por_termo(termo_input)
-else:
-    numero_termo_auto = ""
-    instrumento_auto = ""
+# Verifica se o termo mudou e busca os dados
+if termo_input and termo_input != st.session_state.ultimo_termo:
+    st.session_state.ultimo_termo = termo_input
+    st.session_state.dados_termo_atual = buscar_dados_por_termo(termo_input)
+    # Limpa os dados do funcionário quando o termo muda
+    st.session_state.dados_funcionario_atual = {"cpf": "", "cargo": ""}
+    st.session_state.ultimo_funcionario = ""
 
 col_termo_inst = st.columns([1, 1])
 with col_termo_inst[0]:
-    instrumento = st.text_input(" **Instrumento**:", value=instrumento_auto, key="form_instrumento")
+    instrumento = st.text_input(" **Instrumento**:", 
+                                value=st.session_state.dados_termo_atual["instrumento"], 
+                                key="form_instrumento")
 with col_termo_inst[1]:
-    numero_termo = st.text_input(" **Nº Do Termo de Colaboração**:", value=numero_termo_auto, key="form_num_termo")
+    numero_termo = st.text_input(" **Nº Do Termo de Colaboração**:", 
+                                 value=st.session_state.dados_termo_atual["numero_termo"], 
+                                 key="form_num_termo")
 
 # Dados do Funcionário
 st.markdown("**👤 Dados do Funcionário**")
 funcionarios_do_termo = carregar_funcionarios_por_termo(termo_input)
 funcionario_input = st.selectbox("👤 **Funcionário**", options=[''] + funcionarios_do_termo, index=0, key="form_funcionario")
 
+# CORREÇÃO 02: Carregamento automático de CPF e Cargo
+# Verifica se o funcionário mudou e busca os dados
+if termo_input and funcionario_input and funcionario_input != st.session_state.ultimo_funcionario:
+    st.session_state.ultimo_funcionario = funcionario_input
+    st.session_state.dados_funcionario_atual = buscar_dados_por_funcionario(termo_input, funcionario_input)
+
+# Reset do contador quando muda o funcionário
 if st.session_state.funcionario_anterior != funcionario_input:
     resetar_contador_funcionario(st.session_state.funcionario_anterior, funcionario_input)
     st.session_state.funcionario_anterior = funcionario_input
 
-cpf_auto, cargo_auto = "", ""
-if termo_input and funcionario_input:
-    cpf_auto, cargo_auto = buscar_cpf_cargo_por_funcionario(termo_input, funcionario_input)
-
 col_func_cpf = st.columns([1, 1])
 with col_func_cpf[0]:
-    cpf = st.text_input("🆔 **CPF**:", value=cpf_auto, key="form_cpf")
+    cpf = st.text_input("🆔 **CPF**:", 
+                        value=st.session_state.dados_funcionario_atual["cpf"], 
+                        key="form_cpf")
 with col_func_cpf[1]:
-    cargo = st.text_input("💼 **Cargo**:", value=cargo_auto, key="form_cargo")
+    cargo = st.text_input("💼 **Cargo**:", 
+                          value=st.session_state.dados_funcionario_atual["cargo"], 
+                          key="form_cargo")
 
 # Valores e Data
 st.markdown("**💰 Valores e Data**")
@@ -1255,7 +1298,7 @@ else:
             resetar_formulario()
 
 # ============================================================================
-# REGISTROS SALVOS - COM FUNÇÕES DE EDIÇÃO E EXCLUSÃO (CORRIGIDO)
+# REGISTROS SALVOS - COM FUNÇÕES DE EDIÇÃO E EXCLUSÃO
 # ============================================================================
 st.markdown("---")
 st.subheader("📋 Registros Salvos")
