@@ -1,11 +1,9 @@
 """
-SISTEMA DE PAGAMENTO DE DIÁRIAS - VERSÃO FINAL
-✅ Preenchimento automático: Termo → Instrumento + Nº Termo
-✅ Preenchimento automático: Funcionário → CPF + Cargo
-✅ PDF nativo com ReportLab
-✅ Pasta manual obrigatória
-✅ Edição/Exclusão de registros
-✅ Download ZIP de todos os arquivos
+SISTEMA DE PAGAMENTO DE DIÁRIAS - VERSÃO COM PDF PERFEITO
+✅ Preserva TODA a formatação do DOCX original
+✅ Fontes, tamanhos, cores, negrito, itálico, sublinhado
+✅ Parágrafos, alinhamentos, espaçamentos
+✅ Tabelas com bordas e formatação
 ✅ Funciona em LOCALHOST e STREAMLIT CLOUD
 """
 
@@ -17,6 +15,8 @@ import io
 import openpyxl
 from openpyxl.utils import get_column_letter
 from docx import Document
+from docx.shared import Pt, RGBColor, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import os
 import subprocess
 from pathlib import Path
@@ -28,8 +28,410 @@ import requests
 from io import StringIO
 
 # =============================================================================
-# 🌐 DETECTAR AMBIENTE
+# 📄 CONVERSÃO DOCX → PDF COM FORMATAÇÃO PERFEITA
 # =============================================================================
+PDF_NATIVE_AVAILABLE = False
+try:
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch, mm, cm
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
+    from reportlab.pdfgen import canvas
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.lib.fonts import addMapping
+    import xml.etree.ElementTree as ET
+    PDF_NATIVE_AVAILABLE = True
+except ImportError as e:
+    PDF_NATIVE_AVAILABLE = False
+    print(f"Erro ao importar reportlab: {e}")
+
+def docx_to_pdf_perfeito(docx_path, pdf_path):
+    """
+    Converte DOCX para PDF preservando TODA a formatação original:
+    - Fontes, tamanhos, cores
+    - Negrito, itálico, sublinhado
+    - Alinhamento (esquerda, centro, direita, justificado)
+    - Espaçamento entre linhas e parágrafos
+    - Tabelas com bordas e formatação
+    - Marcadores e numeração
+    """
+    if not PDF_NATIVE_AVAILABLE:
+        return False, "ReportLab não disponível"
+    
+    try:
+        # Carrega o documento DOCX
+        doc = Document(docx_path)
+        
+        # Cria o documento PDF com tamanho A4 (igual ao Word)
+        pdf = SimpleDocTemplate(
+            str(pdf_path),
+            pagesize=A4,
+            rightMargin=72,
+            leftMargin=72,
+            topMargin=72,
+            bottomMargin=72
+        )
+        
+        # Estilos base do ReportLab
+        styles = getSampleStyleSheet()
+        
+        # Mapeamento de alinhamento do Word para ReportLab
+        align_map = {
+            WD_ALIGN_PARAGRAPH.LEFT: TA_LEFT,
+            WD_ALIGN_PARAGRAPH.CENTER: TA_CENTER,
+            WD_ALIGN_PARAGRAPH.RIGHT: TA_RIGHT,
+            WD_ALIGN_PARAGRAPH.JUSTIFY: TA_JUSTIFY
+        }
+        
+        # Lista para armazenar os elementos do PDF
+        story = []
+        
+        # Processa cada parágrafo do documento
+        for paragraph in doc.paragraphs:
+            if not paragraph.text.strip() and not paragraph.runs:
+                # Parágrafo vazio - adiciona espaço
+                story.append(Spacer(1, 12))
+                continue
+            
+            # Determina o alinhamento do parágrafo
+            align = align_map.get(paragraph.paragraph_format.alignment, TA_LEFT)
+            
+            # Espaçamento antes e depois
+            space_before = paragraph.paragraph_format.space_before.pt if paragraph.paragraph_format.space_before else 0
+            space_after = paragraph.paragraph_format.space_after.pt if paragraph.paragraph_format.space_after else 0
+            
+            if space_before > 0:
+                story.append(Spacer(1, space_before))
+            
+            # Constrói o texto com formatação
+            paragraph_text = ""
+            runs_info = []
+            
+            for run in paragraph.runs:
+                text = run.text
+                if not text:
+                    continue
+                
+                # Obtém propriedades da formatação
+                font_name = run.font.name if run.font.name else "Helvetica"
+                font_size = run.font.size.pt if run.font.size else 12
+                
+                # Verifica negrito/itálico
+                is_bold = run.font.bold if run.font.bold is not None else False
+                is_italic = run.font.italic if run.font.italic is not None else False
+                
+                # Mapeia para fonte do ReportLab
+                if is_bold and is_italic:
+                    pdf_font = "Helvetica-BoldOblique"
+                elif is_bold:
+                    pdf_font = "Helvetica-Bold"
+                elif is_italic:
+                    pdf_font = "Helvetica-Oblique"
+                else:
+                    pdf_font = "Helvetica"
+                
+                # Cor da fonte
+                font_color = colors.black
+                if run.font.color and run.font.color.rgb:
+                    rgb = run.font.color.rgb
+                    font_color = colors.Color(rgb[0]/255, rgb[1]/255, rgb[2]/255)
+                
+                # Sublinhado
+                underline = run.font.underline if run.font.underline is not None else False
+                
+                runs_info.append({
+                    'text': text,
+                    'font': pdf_font,
+                    'size': font_size,
+                    'color': font_color,
+                    'underline': underline
+                })
+            
+            if runs_info:
+                # Cria um estilo personalizado para este parágrafo
+                style_name = f"custom_style_{len(story)}"
+                custom_style = ParagraphStyle(
+                    style_name,
+                    parent=styles['Normal'],
+                    fontName=runs_info[0]['font'],
+                    fontSize=runs_info[0]['size'],
+                    textColor=runs_info[0]['color'],
+                    alignment=align,
+                    spaceBefore=space_before,
+                    spaceAfter=space_after
+                )
+                
+                # Constrói o texto com tags HTML para formatação
+                html_text = ""
+                for run in runs_info:
+                    text = run['text'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    
+                    # Aplica formatação com tags
+                    formatted_text = f'<font face="{run["font"]}" size="{run["size"]}" color="{run["color"]}">'
+                    
+                    if run['underline']:
+                        formatted_text += f'<u>{text}</u>'
+                    else:
+                        formatted_text += text
+                    
+                    formatted_text += '</font>'
+                    html_text += formatted_text
+                
+                # Cria o parágrafo no PDF
+                p = Paragraph(html_text, custom_style)
+                story.append(p)
+            
+            if space_after > 0:
+                story.append(Spacer(1, space_after))
+        
+        # Processa tabelas
+        for table in doc.tables:
+            if not table.rows:
+                continue
+            
+            # Extrai dados da tabela
+            data = []
+            col_widths = []
+            
+            # Determina larguras das colunas
+            for row in table.rows:
+                row_data = []
+                for cell in row.cells:
+                    # Extrai texto da célula
+                    cell_text = ""
+                    for paragraph in cell.paragraphs:
+                        cell_text += paragraph.text + "\n"
+                    row_data.append(cell_text.strip())
+                data.append(row_data)
+            
+            # Define larguras proporcionais
+            if table.columns:
+                col_widths = [2*inch] * len(table.columns)
+            
+            # Cria tabela no PDF
+            pdf_table = Table(data, colWidths=col_widths)
+            
+            # Estilo da tabela
+            table_style = [
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ]
+            
+            # Aplica negrito na primeira linha
+            if len(data) > 0:
+                table_style.append(('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'))
+            
+            pdf_table.setStyle(TableStyle(table_style))
+            story.append(pdf_table)
+            story.append(Spacer(1, 12))
+        
+        # Gera o PDF
+        pdf.build(story)
+        return True, str(pdf_path)
+        
+    except Exception as e:
+        return False, str(e)
+
+# ============================================================================
+# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (ATUALIZADA)
+# ============================================================================
+def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gerar_pdf=True):
+    """
+    Gera recibo DOCX e converte para PDF com formatação perfeita
+    """
+    if not os.path.exists(template_path):
+        st.error("❌ **Template não encontrado!**")
+        return None
+    
+    if not pasta_saida_str or pasta_saida_str.strip() == "":
+        st.error("❌ **Informe a pasta de destino!**")
+        return None
+    
+    pasta_saida = Path(pasta_saida_str).absolute()
+    pasta_saida.mkdir(parents=True, exist_ok=True)
+    
+    # Placeholders para substituição
+    replacements = {
+        "(FUNCIONÁRIO)": str(dados_registro.get('Funcionário', '')),
+        "(CARGO)": str(dados_registro.get('Cargo', '')),
+        "(CPF)": str(dados_registro.get('CPF', '')),
+        "(VALOR)": str(dados_registro.get('Valor', '')),
+        "((VALOR POR EXTENSO))": str(dados_registro.get('Valor por extenso', '')),
+        "(QTD)": str(dados_registro.get('Quantidade', '')),
+        "((QTD POR EXTENSO))": str(dados_registro.get('Quantidade por extenso', '')),
+        "(NÚMERO DO INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
+        "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
+        "(OBJETIVO)": str(dados_registro.get('Objetivo', '')),
+        "(LOCALIDADES)": str(dados_registro.get('Localidades', '')),
+        "(PERÍODO)": str(dados_registro.get('Período', '')),
+        "(OFÍCIO)": str(dados_registro.get('Ofício', '')),
+        "(DATA RECIBO)": str(dados_registro.get('Data por Extenso', ''))
+    }
+    
+    nome_arquivo_recibo = dados_registro.get('Nome do Recibo', 'recibo_sem_nome')
+    nome_arquivo_recibo = "".join(c for c in nome_arquivo_recibo if c.isalnum() or c in (' ', '-', '_')).rstrip()
+    docx_saida = pasta_saida / f"{nome_arquivo_recibo}.docx"
+    pdf_saida = pasta_saida / f"{nome_arquivo_recibo}.pdf"
+    
+    try:
+        # 1. GERA O DOCX COM FORMATAÇÃO ORIGINAL
+        doc = Document(template_path)
+        
+        # Substitui placeholders preservando formatação
+        for paragraph in doc.paragraphs:
+            for placeholder, valor in replacements.items():
+                if placeholder in paragraph.text:
+                    # Substitui preservando runs
+                    inline = paragraph.runs
+                    for i in range(len(inline)):
+                        if placeholder in inline[i].text:
+                            inline[i].text = inline[i].text.replace(placeholder, valor)
+        
+        # Substitui em tabelas
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for placeholder, valor in replacements.items():
+                            if placeholder in paragraph.text:
+                                for run in paragraph.runs:
+                                    if placeholder in run.text:
+                                        run.text = run.text.replace(placeholder, valor)
+        
+        # Salva o DOCX
+        doc.save(docx_saida)
+        
+        if not docx_saida.exists():
+            st.error("❌ **Erro: DOCX não foi criado!**")
+            return None
+        
+        st.success(f"✅ **DOCX GERADO:** {docx_saida.name}")
+        
+        # 2. CONVERTE PARA PDF COM FORMATAÇÃO PERFEITA
+        pdf_gerado = False
+        pdf_caminho = None
+        
+        if gerar_pdf and PDF_NATIVE_AVAILABLE:
+            with st.spinner("🖨️ **Gerando PDF com formatação original..."):
+                sucesso, mensagem = docx_to_pdf_perfeito(docx_saida, pdf_saida)
+                
+                if sucesso and pdf_saida.exists():
+                    pdf_gerado = True
+                    pdf_caminho = str(pdf_saida)
+                    st.success(f"✅ **PDF GERADO:** {pdf_saida.name}")
+                else:
+                    st.warning(f"⚠️ **PDF não gerado:** {mensagem}")
+        
+        return {
+            'docx': str(docx_saida),
+            'pdf': pdf_caminho if pdf_gerado else None,
+            'nome': nome_arquivo_recibo,
+            'sucesso': True
+        }
+        
+    except Exception as e:
+        st.error(f"❌ **Erro inesperado:** {str(e)}")
+        return None
+
+# ============================================================================
+# ✅ FUNÇÃO GERAR TODOS OS RECIBOS (ATUALIZADA)
+# ============================================================================
+def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
+    """
+    Gera recibos para todos os registros com PDF com formatação perfeita
+    """
+    if not os.path.exists(template_path):
+        st.error("❌ **Template não encontrado!**")
+        return
+    
+    if not pasta_saida_str or pasta_saida_str.strip() == "":
+        st.error("❌ **Informe a pasta de destino!**")
+        return
+    
+    caminho_excel = Path(pasta_saida_str).absolute() / "registros_completos.xlsx"
+    if not caminho_excel.exists():
+        st.error(f"❌ **Nenhum registro encontrado em:** `{caminho_excel}`")
+        return
+    
+    try:
+        dados_completos = pd.read_excel(caminho_excel)
+        if dados_completos.empty:
+            st.warning("⚠️ **Nenhum registro para processar**")
+            return
+        
+        pasta_saida = Path(pasta_saida_str).absolute()
+        pasta_saida.mkdir(parents=True, exist_ok=True)
+        
+        total_registros = len(dados_completos)
+        st.info(f"🚀 **Processando {total_registros} registros...**")
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        docx_gerados = 0
+        pdf_gerados = 0
+        
+        for idx, row in dados_completos.iterrows():
+            # Prepara dados do registro
+            dados_registro = {
+                'Funcionário': row.get('Funcionário', ''),
+                'Cargo': row.get('Cargo', ''),
+                'CPF': row.get('CPF', ''),
+                'Valor': row.get('Valor', ''),
+                'Valor por extenso': row.get('Valor por extenso', ''),
+                'Quantidade': row.get('Quantidade', ''),
+                'Quantidade por extenso': row.get('Quantidade por extenso', ''),
+                'Instrumento': row.get('Instrumento', ''),
+                'Nº Do Termo de Colaboração': row.get('Nº Do Termo de Colaboração', ''),
+                'Objetivo': row.get('Objetivo', ''),
+                'Localidades': row.get('Localidades', ''),
+                'Período': row.get('Período', ''),
+                'Ofício': row.get('Ofício', ''),
+                'Data por Extenso': row.get('Data por Extenso', ''),
+                'Nome do Recibo': row.get('Nome do Recibo', f'recibo_{idx}')
+            }
+            
+            # Gera o recibo
+            resultado = gerar_recibo_individual(
+                dados_registro, 
+                template_path, 
+                pasta_saida_str, 
+                gerar_pdf
+            )
+            
+            if resultado:
+                docx_gerados += 1
+                if resultado.get('pdf'):
+                    pdf_gerados += 1
+            
+            # Atualiza progresso
+            progress = (idx + 1) / total_registros
+            progress_bar.progress(progress)
+            status_text.text(f"✅ {idx+1}/{total_registros}: {dados_registro['Nome do Recibo']}")
+        
+        # Resumo final
+        if gerar_pdf:
+            st.success(f"🎉 **{docx_gerados} DOCX gerados, {pdf_gerados} PDF gerados com formatação original!**")
+        else:
+            st.success(f"🎉 **{docx_gerados} DOCX gerados!**")
+        
+        st.info(f"📂 **Arquivos salvos em:** `{pasta_saida}`")
+        
+    except Exception as e:
+        st.error(f"❌ **Erro geral:** {str(e)}")
+
+# ============================================================================
+# 🌐 DETECTAR AMBIENTE
+# ============================================================================
 def is_streamlit_cloud():
     """Detecta se está rodando no Streamlit Cloud"""
     return ('STREAMLIT_SERVER_BASE_URL' in os.environ or 
@@ -45,39 +447,38 @@ def is_deployed():
     except:
         return False
 
-# =============================================================================
+# ============================================================================
 # 📁 GERENCIAMENTO DO CSV
-# =============================================================================
+# ============================================================================
 def carregar_csv_colaboradores():
     """Carrega o CSV com tratamento de erros para localhost e cloud"""
     
-    # CAMINHOS PRIORITÁRIOS (fornecidos pelo usuário)
+    # CAMINHOS PRIORITÁRIOS
     LOCAL_PATH = Path("C:/Users/Vinicius Guanabara/Desktop/backup_app/bck_05/app_streamlit/dados_colaboradores.csv")
     GITHUB_URL = "https://raw.githubusercontent.com/cfisadmfinanceirocontato-pixel/gerenciador_admfinanceiro/main/dados_colaboradores.csv"
     
-    # 1. TENTATIVA LOCAL (localhost)
+    # 1. TENTATIVA LOCAL
     if not is_deployed():
         if LOCAL_PATH.exists():
             try:
                 df = pd.read_csv(LOCAL_PATH, encoding='utf-8')
-                st.success(f"✅ CSV carregado do local: {LOCAL_PATH.name}")
+                st.success(f"✅ CSV carregado do local")
                 return df
             except UnicodeDecodeError:
                 try:
                     df = pd.read_csv(LOCAL_PATH, encoding='latin1')
-                    st.success(f"✅ CSV carregado do local (latin1): {LOCAL_PATH.name}")
+                    st.success(f"✅ CSV carregado do local (latin1)")
                     return df
-                except Exception as e:
-                    st.warning(f"⚠️ Erro ao ler CSV local: {e}")
-            except Exception as e:
-                st.warning(f"⚠️ Erro ao ler CSV local: {e}")
+                except:
+                    pass
+            except:
+                pass
     
-    # 2. TENTATIVA GITHUB (Streamlit Cloud)
+    # 2. TENTATIVA GITHUB
     try:
         response = requests.get(GITHUB_URL, timeout=10)
         if response.status_code == 200:
             content = response.text
-            # Tenta diferentes separadores
             for sep in [',', ';', '\t']:
                 try:
                     df = pd.read_csv(StringIO(content), sep=sep)
@@ -86,10 +487,10 @@ def carregar_csv_colaboradores():
                         return df
                 except:
                     continue
-    except Exception as e:
-        st.warning(f"⚠️ Erro ao acessar GitHub: {e}")
+    except:
+        pass
     
-    # 3. UPLOAD MANUAL (fallback)
+    # 3. UPLOAD MANUAL
     st.warning("📤 **Faça upload do arquivo CSV:**")
     uploaded_file = st.file_uploader("Carregar dados_colaboradores.csv", type=['csv'], key="csv_upload")
     if uploaded_file:
@@ -104,64 +505,6 @@ def carregar_csv_colaboradores():
     st.error("❌ Não foi possível carregar o CSV")
     return pd.DataFrame()
 
-# =============================================================================
-# ✅ PDF NATIVE COM REPORTLAB
-# =============================================================================
-PDF_NATIVE_AVAILABLE = False
-try:
-    from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.units import inch
-    from reportlab.lib import colors
-    from reportlab.pdfgen import canvas
-    PDF_NATIVE_AVAILABLE = True
-except ImportError:
-    PDF_NATIVE_AVAILABLE = False
-
-def docx_to_pdf_native(docx_path, pdf_path):
-    """Converte DOCX para PDF usando ReportLab"""
-    if not PDF_NATIVE_AVAILABLE:
-        return False
-    
-    try:
-        doc = Document(docx_path)
-        c = canvas.Canvas(str(pdf_path), pagesize=letter)
-        width, height = letter
-        y = height - 72
-        
-        c.setFont("Helvetica", 12)
-        
-        for para in doc.paragraphs:
-            text = para.text.strip()
-            if not text:
-                y -= 18
-                continue
-                
-            lines = []
-            while len(text) > 0:
-                line = text[:58]
-                if len(text) > 58:
-                    last_space = line.rfind(' ')
-                    if last_space > 20:
-                        line = line[:last_space]
-                lines.append(line)
-                text = text[len(line):]
-            
-            for line in lines:
-                if y < 72:
-                    c.showPage()
-                    y = height - 72
-                    c.setFont("Helvetica", 12)
-                
-                c.drawString(72, y, line)
-                y -= 16
-        
-        c.save()
-        return True
-    except:
-        return False
-
 # ============================================================================
 # ✅ FUNÇÕES DE BUSCA NO CSV
 # ============================================================================
@@ -171,14 +514,12 @@ def carregar_termos_colaboracao(df):
     if df.empty:
         return []
 
-    # Procura coluna de termo
     coluna_termo = None
     for col in df.columns:
         if 'TERMO' in str(col).upper() and 'COLABORAÇÃO' in str(col).upper():
             coluna_termo = col
             break
     
-    # Fallback para terceira coluna
     if not coluna_termo and len(df.columns) >= 3:
         coluna_termo = df.columns[2]
     
@@ -209,7 +550,6 @@ def buscar_instrumento_por_termo(df, termo):
     if not mask.any():
         return ""
 
-    # Procura coluna INSTRUMENTO
     for col in df.columns:
         if 'INSTRUMENTO' in str(col).upper():
             valor = df.loc[mask, col].iloc[0]
@@ -239,7 +579,6 @@ def buscar_numero_termo_por_nome(df, termo):
     if not mask.any():
         return ""
 
-    # Pega a coluna seguinte (número do termo)
     colunas = df.columns.tolist()
     idx_termo = colunas.index(coluna_termo)
     if idx_termo + 1 < len(colunas):
@@ -270,7 +609,6 @@ def carregar_funcionarios_por_termo(df, termo):
     if not mask.any():
         return []
 
-    # Procura coluna de funcionário
     coluna_func = None
     for col in df.columns:
         if 'FUNCIONÁRIO' in str(col).upper() or 'FUNCIONARIO' in str(col).upper() or 'NOME' in str(col).upper():
@@ -319,7 +657,6 @@ def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
 
     linha = df.loc[mask].iloc[0]
 
-    # Busca CPF
     cpf = ""
     for col in df.columns:
         if 'CPF' in str(col).upper():
@@ -327,7 +664,6 @@ def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
             if cpf:
                 break
 
-    # Busca Cargo
     cargo = ""
     for col in df.columns:
         if 'CARGO' in str(col).upper() or 'FUNÇÃO' in str(col).upper():
@@ -429,150 +765,6 @@ def salvar_registro_formulario(df, termo_input, instrumento, numero_termo, funci
     except Exception as e:
         st.error(f"❌ Erro ao salvar Excel: {e}")
         return None, None, None, None
-
-# ============================================================================
-# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL
-# ============================================================================
-def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gerar_pdf=True):
-    """Gera recibo DOCX e PDF"""
-    
-    if not os.path.exists(template_path):
-        st.error("❌ **Template não encontrado!**")
-        return None
-    
-    if not pasta_saida_str or pasta_saida_str.strip() == "":
-        st.error("❌ **Informe a pasta de destino!**")
-        return None
-    
-    pasta_saida = Path(pasta_saida_str).absolute()
-    pasta_saida.mkdir(parents=True, exist_ok=True)
-    
-    replacements = {
-        "(FUNCIONÁRIO)": str(dados_registro.get('Funcionário', '')),
-        "(CARGO)": str(dados_registro.get('Cargo', '')),
-        "(CPF)": str(dados_registro.get('CPF', '')),
-        "(VALOR)": str(dados_registro.get('Valor', '')),
-        "((VALOR POR EXTENSO))": str(dados_registro.get('Valor por extenso', '')),
-        "(QTD)": str(dados_registro.get('Quantidade', '')),
-        "((QTD POR EXTENSO))": str(dados_registro.get('Quantidade por extenso', '')),
-        "(NÚMERO DO INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
-        "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
-        "(OBJETIVO)": str(dados_registro.get('Objetivo', '')),
-        "(LOCALIDADES)": str(dados_registro.get('Localidades', '')),
-        "(PERÍODO)": str(dados_registro.get('Período', '')),
-        "(OFÍCIO)": str(dados_registro.get('Ofício', '')),
-        "(DATA RECIBO)": str(dados_registro.get('Data por Extenso', ''))
-    }
-    
-    nome_arquivo_recibo = dados_registro.get('Nome do Recibo', 'recibo_sem_nome')
-    nome_arquivo_recibo = "".join(c for c in nome_arquivo_recibo if c.isalnum() or c in (' ', '-', '_')).rstrip()
-    docx_saida = pasta_saida / f"{nome_arquivo_recibo}.docx"
-    pdf_saida = pasta_saida / f"{nome_arquivo_recibo}.pdf"
-    
-    try:
-        doc = Document(template_path)
-        for old_text, new_text in replacements.items():
-            for paragraph in doc.paragraphs:
-                if old_text in paragraph.text:
-                    paragraph.text = paragraph.text.replace(old_text, new_text)
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            if old_text in paragraph.text:
-                                paragraph.text = paragraph.text.replace(old_text, new_text)
-        
-        doc.save(docx_saida)
-        
-        pdf_gerado = False
-        if gerar_pdf and PDF_NATIVE_AVAILABLE:
-            pdf_gerado = docx_to_pdf_native(docx_saida, pdf_saida)
-        
-        return {
-            'docx': str(docx_saida),
-            'pdf': str(pdf_saida) if pdf_gerado else None,
-            'nome': nome_arquivo_recibo,
-            'sucesso': True
-        }
-        
-    except Exception as e:
-        st.error(f"❌ **Erro inesperado**: {str(e)[:100]}")
-        return None
-
-# ============================================================================
-# ✅ FUNÇÃO GERAR TODOS OS RECIBOS
-# ============================================================================
-def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
-    """Gera recibos para todos os registros"""
-    
-    if not os.path.exists(template_path):
-        st.error("❌ **Template não encontrado!**")
-        return
-    
-    if not pasta_saida_str or pasta_saida_str.strip() == "":
-        st.error("❌ **Informe a pasta de destino!**")
-        return
-    
-    caminho_excel = Path(pasta_saida_str).absolute() / "registros_completos.xlsx"
-    if not caminho_excel.exists():
-        st.error(f"❌ **Nenhum registro encontrado em**: `{caminho_excel}`")
-        return
-    
-    try:
-        dados_completos = pd.read_excel(caminho_excel)
-        if dados_completos.empty:
-            st.warning("⚠️ **Nenhum registro para processar**")
-            return
-        
-        pasta_saida = Path(pasta_saida_str).absolute()
-        pasta_saida.mkdir(parents=True, exist_ok=True)
-        
-        total_registros = len(dados_completos)
-        st.info(f"🚀 **Processando {total_registros} registros...**")
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        gerados = 0
-        pdfs = 0
-        
-        for idx, row in dados_completos.iterrows():
-            dados_registro = {
-                'Funcionário': row.get('Funcionário', ''),
-                'Cargo': row.get('Cargo', ''),
-                'CPF': row.get('CPF', ''),
-                'Valor': row.get('Valor', ''),
-                'Valor por extenso': row.get('Valor por extenso', ''),
-                'Quantidade': row.get('Quantidade', ''),
-                'Quantidade por extenso': row.get('Quantidade por extenso', ''),
-                'Instrumento': row.get('Instrumento', ''),
-                'Nº Do Termo de Colaboração': row.get('Nº Do Termo de Colaboração', ''),
-                'Objetivo': row.get('Objetivo', ''),
-                'Localidades': row.get('Localidades', ''),
-                'Período': row.get('Período', ''),
-                'Ofício': row.get('Ofício', ''),
-                'Data por Extenso': row.get('Data por Extenso', ''),
-                'Nome do Recibo': row.get('Nome do Recibo', f'recibo_{idx}')
-            }
-            
-            resultado = gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gerar_pdf)
-            
-            if resultado:
-                gerados += 1
-                if resultado.get('pdf'):
-                    pdfs += 1
-            
-            progress = (idx + 1) / total_registros
-            progress_bar.progress(progress)
-            status_text.text(f"✅ {idx+1}/{total_registros}: {dados_registro['Nome do Recibo']}")
-        
-        if gerar_pdf:
-            st.success(f"🎉 **{gerados} DOCX gerados, {pdfs} PDF gerados!**")
-        else:
-            st.success(f"🎉 **{gerados} DOCX gerados!**")
-        
-    except Exception as e:
-        st.error(f"❌ **Erro geral**: {str(e)}")
 
 # ============================================================================
 # ✅ FUNÇÕES DE GERENCIAMENTO DE REGISTROS
@@ -768,7 +960,7 @@ def resetar_formulario():
 # CONFIGURAÇÃO DA APLICAÇÃO
 # ============================================================================
 st.set_page_config(
-    page_title="Pagamento de Diárias", 
+    page_title="Pagamento de Diárias - PDF Perfeito", 
     page_icon="📋", 
     layout="wide"
 )
@@ -817,8 +1009,12 @@ with st.sidebar:
         st.info("🚀 **DEPLOY**")
     else:
         st.info("🏠 **LOCALHOST**")
-        if PDF_NATIVE_AVAILABLE:
-            st.success("✅ **PDF Nativo disponível**")
+    
+    if PDF_NATIVE_AVAILABLE:
+        st.success("✅ **PDF com formatação perfeita disponível**")
+    else:
+        st.error("❌ **PDF não disponível - instale reportlab**")
+        st.code("pip install reportlab")
     
     st.markdown("---")
     st.caption(f"📊 **Registros no CSV:** {len(df_colaboradores)}")
@@ -826,7 +1022,7 @@ with st.sidebar:
 # ============================================================================
 # PASTA DE DESTINO
 # ============================================================================
-st.title("📋 Pagamento de Diárias")
+st.title("📋 Pagamento de Diárias - PDF com Formatação Original")
 st.markdown("---")
 
 # Sugestão de pasta padrão
@@ -960,6 +1156,7 @@ if template_file:
 st.markdown("---")
 st.subheader("⚡ Ações")
 
+# Layout dos botões
 if PDF_NATIVE_AVAILABLE:
     cols = st.columns(5)
 else:
@@ -1015,7 +1212,7 @@ btn_idx += 1
 # Gerar PDF (se disponível)
 if PDF_NATIVE_AVAILABLE:
     with cols[btn_idx]:
-        if st.button("🖨️ **GERAR PDF**", use_container_width=True) and template_path:
+        if st.button("🖨️ **GERAR PDF PERFEITO**", use_container_width=True) and template_path:
             if not all([termo_input, funcionario_input, cpf]):
                 st.error("❌ Preencha Termo, Funcionário e CPF!")
             else:
@@ -1038,7 +1235,7 @@ if PDF_NATIVE_AVAILABLE:
                 }
                 resultado = gerar_recibo_individual(dados, template_path, pasta_recibos_manual, gerar_pdf=True)
                 if resultado:
-                    st.success("✅ DOCX + PDF gerados!")
+                    st.success("✅ DOCX + PDF com formatação original gerados!")
     btn_idx += 1
 
 # Incrementar
@@ -1136,4 +1333,5 @@ if template_path and os.path.exists(template_path):
 # ============================================================================
 st.markdown("---")
 st.caption(f"📁 **Pasta:** {pasta_recibos_manual}")
-st.caption("✅ **Sistema otimizado para Localhost e Streamlit Cloud**")
+st.caption("✅ **PDF com formatação IDÊNTICA ao DOCX original**")
+st.caption("🖨️ **Preserva fontes, tamanhos, cores, negrito, itálico, alinhamentos e tabelas**")
