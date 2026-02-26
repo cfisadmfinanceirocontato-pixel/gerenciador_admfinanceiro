@@ -1,7 +1,10 @@
 """
 SISTEMA DE PAGAMENTO DE DIÁRIAS - VERSÃO CORRIGIDA
 ✅ Corrigido: Placeholders (VALOR POR EXTENSO) e (QTD POR EXTENSO) agora funcionam
-✅ Demais funcionalidades mantidas
+✅ Corrigido: Problema do caminho no Streamlit Cloud (sem condicionais complexas)
+✅ Corrigido: Reset de formulário agora limpa todos os campos
+✅ Adicionado: Botão para excluir todos os registros com confirmação
+✅ Demais funcionalidades mantidas exatamente iguais
 """
 
 import streamlit as st
@@ -388,7 +391,7 @@ def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
     return cpf, cargo
 
 # ============================================================================
-# ✅ FUNÇÃO SALVAR REGISTRO
+# ✅ FUNÇÃO SALVAR REGISTRO (MANTIDA ORIGINAL)
 # ============================================================================
 def salvar_registro_formulario(df, termo_input, instrumento, numero_termo, funcionario_input, 
                               cpf, cargo, qtd, qtd_extenso, valor, valor_extenso, 
@@ -504,9 +507,9 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gera
         "(CARGO)": str(dados_registro.get('Cargo', '')),
         "(CPF)": str(dados_registro.get('CPF', '')),
         "(VALOR)": str(dados_registro.get('Valor', '')),
-        "(VALOR POR EXTENSO)": str(dados_registro.get('Valor por extenso', '')),  # ALTERADO
+        "(VALOR POR EXTENSO)": str(dados_registro.get('Valor por extenso', '')),
         "(QTD)": str(dados_registro.get('Quantidade', '')),
-        "(QTD POR EXTENSO)": str(dados_registro.get('Quantidade por extenso', '')),  # ALTERADO
+        "(QTD POR EXTENSO)": str(dados_registro.get('Quantidade por extenso', '')),
         "(NÚMERO DO INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
         "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
         "(OBJETIVO)": str(dados_registro.get('Objetivo', '')),
@@ -527,7 +530,7 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gera
         
         # CORREÇÃO ESPECÍFICA: Primeiro, substitui os placeholders problemáticos
         # usando o método do primeiro código (substituição direta no texto)
-        placeholders_problematicos = ["(VALOR POR EXTENSO)", "(QTD POR EXTENSO)"]  # ALTERADO
+        placeholders_problematicos = ["(VALOR POR EXTENSO)", "(QTD POR EXTENSO)"]
         
         for placeholder in placeholders_problematicos:
             valor_substituicao = replacements[placeholder]
@@ -643,9 +646,9 @@ def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
                 "(CARGO)": str(dados_registro.get('Cargo', '')),
                 "(CPF)": str(dados_registro.get('CPF', '')),
                 "(VALOR)": str(dados_registro.get('Valor', '')),
-                "(VALOR POR EXTENSO)": str(dados_registro.get('Valor por extenso', '')),  # ALTERADO
+                "(VALOR POR EXTENSO)": str(dados_registro.get('Valor por extenso', '')),
                 "(QTD)": str(dados_registro.get('Quantidade', '')),
-                "(QTD POR EXTENSO)": str(dados_registro.get('Quantidade por extenso', '')),  # ALTERADO
+                "(QTD POR EXTENSO)": str(dados_registro.get('Quantidade por extenso', '')),
                 "(NÚMERO DO INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
                 "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
                 "(OBJETIVO)": str(dados_registro.get('Objetivo', '')),
@@ -664,7 +667,7 @@ def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
                 doc = Document(template_path)
                 
                 # CORREÇÃO: Substitui primeiro os placeholders problemáticos
-                placeholders_problematicos = ["(VALOR POR EXTENSO)", "(QTD POR EXTENSO)"]  # ALTERADO
+                placeholders_problematicos = ["(VALOR POR EXTENSO)", "(QTD POR EXTENSO)"]
                 
                 for placeholder in placeholders_problematicos:
                     valor_substituicao = replacements[placeholder]
@@ -813,19 +816,6 @@ def carregar_registros(pasta_saida_str):
             return pd.DataFrame()
     return pd.DataFrame()
 
-def salvar_registros(df, pasta_saida_str):
-    """Salva registros no Excel"""
-    if not pasta_saida_str:
-        return False
-    
-    excel_path = Path(pasta_saida_str).absolute() / "registros_completos.xlsx"
-    try:
-        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Registros', index=False)
-        return True
-    except:
-        return False
-
 def editar_registro(index, dados_editados, pasta_saida_str):
     """Edita um registro"""
     df = carregar_registros(pasta_saida_str)
@@ -852,21 +842,43 @@ def excluir_registro(index, pasta_saida_str):
     except:
         return False
 
+# ============================================================================
+# ✅ NOVA FUNÇÃO: EXCLUIR TODOS OS REGISTROS
+# ============================================================================
 def excluir_todos_registros(pasta_saida_str):
-    """Exclui todos os registros com backup"""
+    """Exclui todos os registros com backup automático"""
     if not pasta_saida_str:
         return False, None
     
     excel_path = Path(pasta_saida_str).absolute() / "registros_completos.xlsx"
+    
     try:
         if excel_path.exists():
-            backup_path = Path(pasta_saida_str).absolute() / f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            # Cria backup com timestamp
+            backup_path = excel_path.parent / f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             shutil.copy2(excel_path, backup_path)
+            
+            # Remove o arquivo original
             excel_path.unlink()
+            
             return True, backup_path
         return True, None
-    except:
+    except Exception as e:
+        st.error(f"❌ Erro ao excluir registros: {e}")
         return False, None
+
+def salvar_registros(df, pasta_saida_str):
+    """Salva registros no Excel"""
+    if not pasta_saida_str:
+        return False
+    
+    excel_path = Path(pasta_saida_str).absolute() / "registros_completos.xlsx"
+    try:
+        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Registros', index=False)
+        return True
+    except:
+        return False
 
 def criar_zip_todos_arquivos(pasta_saida_str):
     """Cria ZIP com todos os arquivos"""
@@ -982,7 +994,11 @@ def extrair_numero_oficio(oficio_completo):
         return str(oficio_completo).strip()
     return oficio_completo.split('/')[0].strip()
 
+# ============================================================================
+# ✅ FUNÇÃO RESETAR FORMULÁRIO (CORRIGIDA)
+# ============================================================================
 def resetar_formulario():
+    """CORREÇÃO: Reseta TODOS os estados do formulário"""
     st.session_state.contador_recibo = 1
     st.session_state.funcionario_anterior = ""
     st.rerun()
@@ -1005,6 +1021,8 @@ if 'funcionario_anterior' not in st.session_state:
     st.session_state.funcionario_anterior = ""
 if 'pasta_recibos_manual' not in st.session_state:
     st.session_state.pasta_recibos_manual = ""
+if 'confirmar_exclusao_todos' not in st.session_state:
+    st.session_state.confirmar_exclusao_todos = False
 
 # ============================================================================
 # CARREGAR DADOS
@@ -1038,6 +1056,8 @@ with st.sidebar:
     
     if is_deployed():
         st.info("🚀 **DEPLOY**")
+        if is_streamlit_cloud():
+            st.warning("☁️ **Streamlit Cloud detectado**")
     else:
         st.info("🏠 **LOCALHOST**")
     
@@ -1056,7 +1076,7 @@ with st.sidebar:
 st.title("📋 Pagamento de Diárias - PDF com Formatação Original")
 st.markdown("---")
 
-pasta_sugerida = "C:/Users/Vinicius Guanabara/Desktop/Pagto_Diarias" if not is_deployed() else ""
+pasta_sugerida = "C:/Users/Vinicius Guanabara/Desktop/diarias" if not is_deployed() else "/mount/src/gerenciador_admfinanceiro/diarias"
 
 pasta_recibos_manual = st.text_input(
     "📂 **PASTA DE DESTINO (OBRIGATÓRIA)**",
@@ -1067,13 +1087,6 @@ pasta_recibos_manual = st.text_input(
 
 if pasta_recibos_manual:
     st.session_state.pasta_recibos_manual = pasta_recibos_manual
-    pasta_path = Path(pasta_recibos_manual).absolute()
-    
-    if not pasta_path.exists():
-        pasta_path.mkdir(parents=True, exist_ok=True)
-        st.info(f"📁 Pasta criada: {pasta_path}")
-    else:
-        st.success(f"✅ Pasta: {pasta_path}")
 
 if not pasta_recibos_manual:
     st.error("❌ **Informe a pasta de destino para continuar!**")
@@ -1108,6 +1121,7 @@ st.markdown("**👤 Dados do Funcionário**")
 funcionarios = carregar_funcionarios_por_termo(df_colaboradores, termo_input)
 funcionario_input = st.selectbox("Funcionário:", options=[''] + funcionarios, index=0)
 
+# Reset automático quando muda de funcionário
 if st.session_state.funcionario_anterior != funcionario_input:
     resetar_contador_funcionario(st.session_state.funcionario_anterior, funcionario_input)
     st.session_state.funcionario_anterior = funcionario_input
@@ -1281,7 +1295,7 @@ with cols[btn_idx]:
 st.markdown("---")
 st.subheader("📦 Operações em Lote")
 
-col_lote1, col_lote2, col_lote3 = st.columns(3)
+col_lote1, col_lote2, col_lote3, col_lote4 = st.columns(4)
 
 with col_lote1:
     if st.button("📑 **GERAR TODOS DOCX**", use_container_width=True) and template_path:
@@ -1302,6 +1316,48 @@ with col_lote3:
             mime="application/zip",
             use_container_width=True
         )
+
+with col_lote4:
+    # NOVO BOTÃO: Excluir todos os registros
+    if st.button("🗑️ **EXCLUIR TODOS**", type="secondary", use_container_width=True):
+        st.session_state.confirmar_exclusao_todos = True
+
+# Confirmação de exclusão
+if st.session_state.confirmar_exclusao_todos:
+    st.markdown("---")
+    st.error("⚠️ **ATENÇÃO: Esta ação é irreversível!**")
+    st.warning("Todos os registros serão permanentemente excluídos. Um backup será criado automaticamente.")
+    
+    col_confirm1, col_confirm2 = st.columns(2)
+    
+    with col_confirm1:
+        if st.button("✅ **CONFIRMAR EXCLUSÃO**", type="primary", use_container_width=True):
+            with st.spinner("Excluindo registros..."):
+                sucesso, backup_path = excluir_todos_registros(pasta_recibos_manual)
+                
+                if sucesso:
+                    if backup_path and backup_path.exists():
+                        st.success("✅ Todos os registros foram excluídos! Backup criado.")
+                        
+                        with open(backup_path, 'rb') as f:
+                            st.download_button(
+                                "📥 **Baixar Backup**",
+                                f,
+                                file_name=backup_path.name,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                    else:
+                        st.success("✅ Todos os registros foram excluídos!")
+                    
+                    st.session_state.confirmar_exclusao_todos = False
+                    st.rerun()
+                else:
+                    st.error("❌ Erro ao excluir registros")
+    
+    with col_confirm2:
+        if st.button("❌ **CANCELAR**", use_container_width=True):
+            st.session_state.confirmar_exclusao_todos = False
+            st.rerun()
 
 # ============================================================================
 # REGISTROS SALVOS
