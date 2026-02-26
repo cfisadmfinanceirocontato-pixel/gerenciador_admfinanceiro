@@ -1,8 +1,7 @@
 """
 SISTEMA DE PAGAMENTO DE DIÁRIAS - VERSÃO CORRIGIDA
-✅ Correção: Nº do Termo vem da coluna "Nº TERMO" do CSV
-✅ Correção: Placeholders ((VALOR POR EXTENSO)) e ((QTD POR EXTENSO)) preenchidos corretamente
-✅ Demais funcionalidades preservadas
+✅ Corrigido: Placeholders (VALOR POR EXTENSO) e (QTD POR EXTENSO) agora funcionam
+✅ Demais funcionalidades mantidas
 """
 
 import streamlit as st
@@ -33,18 +32,13 @@ try:
     from reportlab.lib.pagesizes import letter, A4
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch, mm, cm
+    from reportlab.lib.units import inch
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
     from reportlab.pdfgen import canvas
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.lib.fonts import addMapping
-    import xml.etree.ElementTree as ET
     PDF_NATIVE_AVAILABLE = True
 except ImportError as e:
     PDF_NATIVE_AVAILABLE = False
-    print(f"Erro ao importar reportlab: {e}")
 
 def docx_to_pdf_perfeito(docx_path, pdf_path):
     """
@@ -95,7 +89,6 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
                 if not text:
                     continue
                 
-                font_name = run.font.name if run.font.name else "Helvetica"
                 font_size = run.font.size.pt if run.font.size else 12
                 
                 is_bold = run.font.bold if run.font.bold is not None else False
@@ -204,7 +197,7 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
         return False, str(e)
 
 # ============================================================================
-# ✅ FUNÇÕES DE BUSCA NO CSV (CORRIGIDAS)
+# ✅ FUNÇÕES DE BUSCA NO CSV
 # ============================================================================
 @st.cache_data(ttl=300)
 def carregar_termos_colaboracao(df):
@@ -212,7 +205,6 @@ def carregar_termos_colaboracao(df):
     if df.empty:
         return []
 
-    # Procura coluna de termo (case insensitive)
     coluna_termo = None
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -220,7 +212,6 @@ def carregar_termos_colaboracao(df):
             coluna_termo = col
             break
     
-    # Fallback para terceira coluna se necessário
     if not coluna_termo and len(df.columns) >= 3:
         coluna_termo = df.columns[2]
     
@@ -235,7 +226,6 @@ def buscar_instrumento_por_termo(df, termo):
     if df.empty or not termo:
         return ""
 
-    # Procura coluna de termo
     coluna_termo = None
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -253,7 +243,6 @@ def buscar_instrumento_por_termo(df, termo):
     if not mask.any():
         return ""
 
-    # Procura coluna INSTRUMENTO
     for col in df.columns:
         col_upper = str(col).upper().strip()
         if 'INSTRUMENTO' in col_upper:
@@ -265,12 +254,11 @@ def buscar_instrumento_por_termo(df, termo):
 @st.cache_data(ttl=300)
 def buscar_numero_termo_por_nome(df, termo):
     """
-    CORREÇÃO: Busca o número do termo na coluna "Nº TERMO"
+    Busca o número do termo na coluna "Nº TERMO"
     """
     if df.empty or not termo:
         return ""
 
-    # Procura coluna de termo
     coluna_termo = None
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -288,21 +276,17 @@ def buscar_numero_termo_por_nome(df, termo):
     if not mask.any():
         return ""
 
-    # CORREÇÃO: Procura especificamente pela coluna "Nº TERMO"
     coluna_numero = None
     for col in df.columns:
         col_upper = str(col).upper().strip()
-        # Procura por variações de "Nº TERMO", "NUMERO TERMO", "N° TERMO"
         if ('Nº' in col_upper or 'N°' in col_upper or 'NUMERO' in col_upper) and 'TERMO' in col_upper:
             coluna_numero = col
             break
     
-    # Se encontrou a coluna específica, usa ela
     if coluna_numero:
         valor = df.loc[mask, coluna_numero].iloc[0]
         return str(valor).strip() if pd.notna(valor) else ""
     
-    # Fallback: pega a coluna seguinte (comportamento antigo)
     colunas = df.columns.tolist()
     idx_termo = colunas.index(coluna_termo)
     if idx_termo + 1 < len(colunas):
@@ -317,7 +301,6 @@ def carregar_funcionarios_por_termo(df, termo):
     if df.empty or not termo:
         return []
 
-    # Procura coluna de termo
     coluna_termo = None
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -335,7 +318,6 @@ def carregar_funcionarios_por_termo(df, termo):
     if not mask.any():
         return []
 
-    # Procura coluna de funcionário
     coluna_func = None
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -354,7 +336,6 @@ def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
     if df.empty or not termo or not funcionario:
         return "", ""
 
-    # Procura coluna de termo
     coluna_termo = None
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -368,7 +349,6 @@ def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
     if not coluna_termo:
         return "", ""
 
-    # Procura coluna de funcionário
     coluna_func = None
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -389,7 +369,6 @@ def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
 
     linha = df.loc[mask].iloc[0]
 
-    # Busca CPF
     cpf = ""
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -398,7 +377,6 @@ def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
             if cpf:
                 break
 
-    # Busca Cargo
     cargo = ""
     for col in df.columns:
         col_upper = str(col).upper().strip()
@@ -410,7 +388,7 @@ def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
     return cpf, cargo
 
 # ============================================================================
-# ✅ FUNÇÃO SALVAR REGISTRO (CORRIGIDA)
+# ✅ FUNÇÃO SALVAR REGISTRO
 # ============================================================================
 def salvar_registro_formulario(df, termo_input, instrumento, numero_termo, funcionario_input, 
                               cpf, cargo, qtd, qtd_extenso, valor, valor_extenso, 
@@ -503,33 +481,32 @@ def salvar_registro_formulario(df, termo_input, instrumento, numero_termo, funci
         return None, None, None, None
 
 # ============================================================================
-# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (CORRIGIDA - PLACEHOLDERS)
+# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (CORRIGIDA)
 # ============================================================================
 def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gerar_pdf=True):
     """
-    Gera recibo DOCX e converte para PDF com formatação perfeita
-    CORREÇÃO: Placeholders ((VALOR POR EXTENSO)) e ((QTD POR EXTENSO)) mapeados corretamente
+    ✅ Corrigido: Placeholders (VALOR POR EXTENSO) e (QTD POR EXTENSO) agora funcionam
     """
     if not os.path.exists(template_path):
-        st.error("❌ **Template não encontrado!**")
-        return None
+        st.error("❌ **MODELO.docx não encontrado!**")
+        return None, None
     
     if not pasta_saida_str or pasta_saida_str.strip() == "":
         st.error("❌ **Informe a pasta de destino!**")
-        return None
+        return None, None
     
     pasta_saida = Path(pasta_saida_str).absolute()
     pasta_saida.mkdir(parents=True, exist_ok=True)
     
-    # CORREÇÃO: Mapeamento correto dos placeholders
+    # EXATAMENTE o mesmo mapeamento do primeiro código
     replacements = {
         "(FUNCIONÁRIO)": str(dados_registro.get('Funcionário', '')),
         "(CARGO)": str(dados_registro.get('Cargo', '')),
         "(CPF)": str(dados_registro.get('CPF', '')),
         "(VALOR)": str(dados_registro.get('Valor', '')),
-        "((VALOR POR EXTENSO))": str(dados_registro.get('Valor por extenso', '')),  # CORRIGIDO
+        "(VALOR POR EXTENSO)": str(dados_registro.get('Valor por extenso', '')),  # ALTERADO
         "(QTD)": str(dados_registro.get('Quantidade', '')),
-        "((QTD POR EXTENSO))": str(dados_registro.get('Quantidade por extenso', '')),  # CORRIGIDO
+        "(QTD POR EXTENSO)": str(dados_registro.get('Quantidade por extenso', '')),  # ALTERADO
         "(NÚMERO DO INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
         "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
         "(OBJETIVO)": str(dados_registro.get('Objetivo', '')),
@@ -545,40 +522,61 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gera
     pdf_saida = pasta_saida / f"{nome_arquivo_recibo}.pdf"
     
     try:
-        # Gera o DOCX
+        # Carrega o template
         doc = Document(template_path)
         
-        # Substitui placeholders preservando formatação
-        for paragraph in doc.paragraphs:
-            for placeholder, valor in replacements.items():
-                if placeholder in paragraph.text:
-                    # Substitui preservando runs
-                    inline = paragraph.runs
-                    for i in range(len(inline)):
-                        if placeholder in inline[i].text:
-                            inline[i].text = inline[i].text.replace(placeholder, valor)
+        # CORREÇÃO ESPECÍFICA: Primeiro, substitui os placeholders problemáticos
+        # usando o método do primeiro código (substituição direta no texto)
+        placeholders_problematicos = ["(VALOR POR EXTENSO)", "(QTD POR EXTENSO)"]  # ALTERADO
         
-        # Substitui em tabelas
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        for placeholder, valor in replacements.items():
+        for placeholder in placeholders_problematicos:
+            valor_substituicao = replacements[placeholder]
+            
+            # Substitui em parágrafos (substituição direta, igual ao primeiro código)
+            for paragraph in doc.paragraphs:
+                if placeholder in paragraph.text:
+                    # Substitui diretamente no texto do parágrafo (igual ao primeiro código)
+                    paragraph.text = paragraph.text.replace(placeholder, valor_substituicao)
+            
+            # Substitui em tabelas
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
                             if placeholder in paragraph.text:
+                                paragraph.text = paragraph.text.replace(placeholder, valor_substituicao)
+        
+        # Depois, substitui os demais placeholders (mantém a lógica atual que funciona)
+        for old_text, new_text in replacements.items():
+            # Pula os que já foram substituídos
+            if old_text in placeholders_problematicos:
+                continue
+                
+            for paragraph in doc.paragraphs:
+                if old_text in paragraph.text:
+                    for run in paragraph.runs:
+                        if old_text in run.text:
+                            run.text = run.text.replace(old_text, new_text)
+            
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            if old_text in paragraph.text:
                                 for run in paragraph.runs:
-                                    if placeholder in run.text:
-                                        run.text = run.text.replace(placeholder, valor)
+                                    if old_text in run.text:
+                                        run.text = run.text.replace(old_text, new_text)
         
         # Salva o DOCX
         doc.save(docx_saida)
         
         if not docx_saida.exists():
             st.error("❌ **Erro: DOCX não foi criado!**")
-            return None
+            return None, None
         
         st.success(f"✅ **DOCX GERADO:** {docx_saida.name}")
         
-        # Converte para PDF
+        # PDF com formatação perfeita
         pdf_gerado = False
         pdf_caminho = None
         
@@ -593,26 +591,22 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gera
                 else:
                     st.warning(f"⚠️ **PDF não gerado:** {mensagem}")
         
-        return {
-            'docx': str(docx_saida),
-            'pdf': pdf_caminho if pdf_gerado else None,
-            'nome': nome_arquivo_recibo,
-            'sucesso': True
-        }
+        return (str(docx_saida) if not gerar_pdf else str(pdf_saida) if pdf_gerado else None, 
+                str(docx_saida))
         
     except Exception as e:
         st.error(f"❌ **Erro inesperado:** {str(e)}")
-        return None
+        return None, None
 
 # ============================================================================
-# ✅ FUNÇÃO GERAR TODOS OS RECIBOS
+# ✅ FUNÇÃO GERAR TODOS OS RECIBOS (CORRIGIDA)
 # ============================================================================
 def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
     """
-    Gera recibos para todos os registros
+    ✅ Gera recibos para todos os registros
     """
     if not os.path.exists(template_path):
-        st.error("❌ **Template não encontrado!**")
+        st.error("❌ **MODELO.docx não encontrado!**")
         return
     
     if not pasta_saida_str or pasta_saida_str.strip() == "":
@@ -621,7 +615,7 @@ def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
     
     caminho_excel = Path(pasta_saida_str).absolute() / "registros_completos.xlsx"
     if not caminho_excel.exists():
-        st.error(f"❌ **Nenhum registro encontrado em:** `{caminho_excel}`")
+        st.error(f"❌ **Nenhum registro salvo encontrado em**: `{caminho_excel}`")
         return
     
     try:
@@ -634,59 +628,99 @@ def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
         pasta_saida.mkdir(parents=True, exist_ok=True)
         
         total_registros = len(dados_completos)
-        st.info(f"🚀 **Processando {total_registros} registros...**")
+        st.info(f"🚀 **Processando {total_registros} registros em**: `{pasta_saida}`")
         
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        docx_gerados = 0
-        pdf_gerados = 0
+        pdfs_gerados = 0
+        docxs_gerados = 0
         
-        for idx, row in dados_completos.iterrows():
-            # Prepara dados do registro com os campos corretos
-            dados_registro = {
-                'Funcionário': row.get('Funcionário', ''),
-                'Cargo': row.get('Cargo', ''),
-                'CPF': row.get('CPF', ''),
-                'Valor': row.get('Valor', ''),
-                'Valor por extenso': row.get('Valor por extenso', ''),  # Campo correto
-                'Quantidade': row.get('Quantidade', ''),
-                'Quantidade por extenso': row.get('Quantidade por extenso', ''),  # Campo correto
-                'Instrumento': row.get('Instrumento', ''),
-                'Nº Do Termo de Colaboração': row.get('Nº Do Termo de Colaboração', ''),
-                'Objetivo': row.get('Objetivo', ''),
-                'Localidades': row.get('Localidades', ''),
-                'Período': row.get('Período', ''),
-                'Ofício': row.get('Ofício', ''),
-                'Data por Extenso': row.get('Data por Extenso', ''),
-                'Nome do Recibo': row.get('Nome do Recibo', f'recibo_{idx}')
+        for idx, dados_registro in dados_completos.iterrows():
+            # EXATAMENTE o mesmo mapeamento do primeiro código
+            replacements = {
+                "(FUNCIONÁRIO)": str(dados_registro.get('Funcionário', '')),
+                "(CARGO)": str(dados_registro.get('Cargo', '')),
+                "(CPF)": str(dados_registro.get('CPF', '')),
+                "(VALOR)": str(dados_registro.get('Valor', '')),
+                "(VALOR POR EXTENSO)": str(dados_registro.get('Valor por extenso', '')),  # ALTERADO
+                "(QTD)": str(dados_registro.get('Quantidade', '')),
+                "(QTD POR EXTENSO)": str(dados_registro.get('Quantidade por extenso', '')),  # ALTERADO
+                "(NÚMERO DO INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
+                "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
+                "(OBJETIVO)": str(dados_registro.get('Objetivo', '')),
+                "(LOCALIDADES)": str(dados_registro.get('Localidades', '')),
+                "(PERÍODO)": str(dados_registro.get('Período', '')),
+                "(OFÍCIO)": str(dados_registro.get('Ofício', '')),
+                "(DATA RECIBO)": str(dados_registro.get('Data por Extenso', ''))
             }
             
-            # Gera o recibo
-            resultado = gerar_recibo_individual(
-                dados_registro, 
-                template_path, 
-                pasta_saida_str, 
-                gerar_pdf
-            )
+            nome_arquivo_recibo = dados_registro.get('Nome do Recibo', f'recibo_sem_nome_{idx}')
+            nome_arquivo_recibo = "".join(c for c in str(nome_arquivo_recibo) if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            docx_saida = pasta_saida / f"{nome_arquivo_recibo}.docx"
+            pdf_saida = pasta_saida / f"{nome_arquivo_recibo}.pdf"
             
-            if resultado:
-                docx_gerados += 1
-                if resultado.get('pdf'):
-                    pdf_gerados += 1
-            
-            # Atualiza progresso
-            progress = (idx + 1) / total_registros
-            progress_bar.progress(progress)
-            status_text.text(f"✅ {idx+1}/{total_registros}: {dados_registro['Nome do Recibo']}")
+            try:
+                doc = Document(template_path)
+                
+                # CORREÇÃO: Substitui primeiro os placeholders problemáticos
+                placeholders_problematicos = ["(VALOR POR EXTENSO)", "(QTD POR EXTENSO)"]  # ALTERADO
+                
+                for placeholder in placeholders_problematicos:
+                    valor_substituicao = replacements[placeholder]
+                    
+                    for paragraph in doc.paragraphs:
+                        if placeholder in paragraph.text:
+                            paragraph.text = paragraph.text.replace(placeholder, valor_substituicao)
+                    
+                    for table in doc.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for paragraph in cell.paragraphs:
+                                    if placeholder in paragraph.text:
+                                        paragraph.text = paragraph.text.replace(placeholder, valor_substituicao)
+                
+                # Depois substitui os demais
+                for old_text, new_text in replacements.items():
+                    if old_text in placeholders_problematicos:
+                        continue
+                        
+                    for paragraph in doc.paragraphs:
+                        if old_text in paragraph.text:
+                            for run in paragraph.runs:
+                                if old_text in run.text:
+                                    run.text = run.text.replace(old_text, new_text)
+                    
+                    for table in doc.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for paragraph in cell.paragraphs:
+                                    if old_text in paragraph.text:
+                                        for run in paragraph.runs:
+                                            if old_text in run.text:
+                                                run.text = run.text.replace(old_text, new_text)
+                
+                doc.save(docx_saida)
+                docxs_gerados += 1
+                
+                if gerar_pdf and PDF_NATIVE_AVAILABLE:
+                    if docx_to_pdf_perfeito(docx_saida, pdf_saida):
+                        pdfs_gerados += 1
+                
+                progress = (idx + 1) / total_registros
+                progress_bar.progress(progress)
+                status_text.text(f"✅ {idx+1}/{total_registros}: {nome_arquivo_recibo}")
+                
+            except Exception as e:
+                st.error(f"❌ Erro no registro {idx}: {str(e)[:50]}")
+                continue
         
-        # Resumo final
         if gerar_pdf:
-            st.success(f"🎉 **{docx_gerados} DOCX gerados, {pdf_gerados} PDF gerados com formatação original!**")
+            st.success(f"🎉 **{docxs_gerados} DOCX gerados, {pdfs_gerados} PDF gerados!**")
         else:
-            st.success(f"🎉 **{docx_gerados} DOCX gerados!**")
+            st.success(f"🎉 **{docxs_gerados} DOCX gerados!**")
         
-        st.info(f"📂 **Arquivos salvos em:** `{pasta_saida}`")
+        st.info(f"📂 **TODOS os arquivos em**: `{pasta_saida}`")
         
     except Exception as e:
         st.error(f"❌ **Erro geral:** {str(e)}")
@@ -715,11 +749,9 @@ def is_deployed():
 def carregar_csv_colaboradores():
     """Carrega o CSV com tratamento de erros para localhost e cloud"""
     
-    # CAMINHOS PRIORITÁRIOS
-    LOCAL_PATH = Path("C:/Users/Vinicius Guanabara/Desktop/backup_app/bck_05/app_streamlit/dados_colaboradores.csv")
+    LOCAL_PATH = Path("C:/Users/Vinicius Guanabara/Desktop/app_streamlit/dados_colaboradores.csv")
     GITHUB_URL = "https://raw.githubusercontent.com/cfisadmfinanceirocontato-pixel/gerenciador_admfinanceiro/main/dados_colaboradores.csv"
     
-    # 1. TENTATIVA LOCAL
     if not is_deployed():
         if LOCAL_PATH.exists():
             try:
@@ -736,7 +768,6 @@ def carregar_csv_colaboradores():
             except:
                 pass
     
-    # 2. TENTATIVA GITHUB
     try:
         response = requests.get(GITHUB_URL, timeout=10)
         if response.status_code == 200:
@@ -752,7 +783,6 @@ def carregar_csv_colaboradores():
     except:
         pass
     
-    # 3. UPLOAD MANUAL
     st.warning("📤 **Faça upload do arquivo CSV:**")
     uploaded_file = st.file_uploader("Carregar dados_colaboradores.csv", type=['csv'], key="csv_upload")
     if uploaded_file:
@@ -1026,7 +1056,6 @@ with st.sidebar:
 st.title("📋 Pagamento de Diárias - PDF com Formatação Original")
 st.markdown("---")
 
-# Sugestão de pasta padrão
 pasta_sugerida = "C:/Users/Vinicius Guanabara/Desktop/Pagto_Diarias" if not is_deployed() else ""
 
 pasta_recibos_manual = st.text_input(
@@ -1061,10 +1090,9 @@ st.subheader("📝 Novo Registro")
 st.markdown("**📋 Dados do Termo**")
 termo_input = st.selectbox("Termo de Colaboração:", options=[''] + termos_unicos, index=0)
 
-# Busca automática
 if termo_input:
     instrumento_auto = buscar_instrumento_por_termo(df_colaboradores, termo_input)
-    numero_termo_auto = buscar_numero_termo_por_nome(df_colaboradores, termo_input)  # CORRIGIDO: Agora busca na coluna "Nº TERMO"
+    numero_termo_auto = buscar_numero_termo_por_nome(df_colaboradores, termo_input)
 else:
     instrumento_auto = ""
     numero_termo_auto = ""
@@ -1080,12 +1108,10 @@ st.markdown("**👤 Dados do Funcionário**")
 funcionarios = carregar_funcionarios_por_termo(df_colaboradores, termo_input)
 funcionario_input = st.selectbox("Funcionário:", options=[''] + funcionarios, index=0)
 
-# Reset contador
 if st.session_state.funcionario_anterior != funcionario_input:
     resetar_contador_funcionario(st.session_state.funcionario_anterior, funcionario_input)
     st.session_state.funcionario_anterior = funcionario_input
 
-# Busca CPF e Cargo
 cpf_auto, cargo_auto = "", ""
 if termo_input and funcionario_input:
     cpf_auto, cargo_auto = buscar_cpf_cargo_por_funcionario(df_colaboradores, termo_input, funcionario_input)
@@ -1157,7 +1183,6 @@ if template_file:
 st.markdown("---")
 st.subheader("⚡ Ações")
 
-# Layout dos botões
 if PDF_NATIVE_AVAILABLE:
     cols = st.columns(5)
 else:
@@ -1193,9 +1218,9 @@ with cols[btn_idx]:
                 'Cargo': cargo,
                 'CPF': cpf,
                 'Valor': valor,
-                'Valor por extenso': valor_extenso,  # Campo correto
+                'Valor por extenso': valor_extenso,
                 'Quantidade': qtd,
-                'Quantidade por extenso': qtd_extenso,  # Campo correto
+                'Quantidade por extenso': qtd_extenso,
                 'Instrumento': instrumento,
                 'Nº Do Termo de Colaboração': numero_termo,
                 'Objetivo': objetivo,
@@ -1206,11 +1231,11 @@ with cols[btn_idx]:
                 'Nome do Recibo': nome_recibo
             }
             resultado = gerar_recibo_individual(dados, template_path, pasta_recibos_manual, gerar_pdf=False)
-            if resultado:
+            if resultado and resultado[0] is not None:
                 st.success("✅ DOCX gerado!")
 btn_idx += 1
 
-# Gerar PDF (se disponível)
+# Gerar PDF
 if PDF_NATIVE_AVAILABLE:
     with cols[btn_idx]:
         if st.button("🖨️ **GERAR PDF PERFEITO**", use_container_width=True) and template_path:
@@ -1222,9 +1247,9 @@ if PDF_NATIVE_AVAILABLE:
                     'Cargo': cargo,
                     'CPF': cpf,
                     'Valor': valor,
-                    'Valor por extenso': valor_extenso,  # Campo correto
+                    'Valor por extenso': valor_extenso,
                     'Quantidade': qtd,
-                    'Quantidade por extenso': qtd_extenso,  # Campo correto
+                    'Quantidade por extenso': qtd_extenso,
                     'Instrumento': instrumento,
                     'Nº Do Termo de Colaboração': numero_termo,
                     'Objetivo': objetivo,
@@ -1235,7 +1260,7 @@ if PDF_NATIVE_AVAILABLE:
                     'Nome do Recibo': nome_recibo
                 }
                 resultado = gerar_recibo_individual(dados, template_path, pasta_recibos_manual, gerar_pdf=True)
-                if resultado:
+                if resultado and resultado[0] is not None:
                     st.success("✅ DOCX + PDF com formatação original gerados!")
     btn_idx += 1
 
@@ -1287,7 +1312,6 @@ st.subheader("📋 Registros Salvos")
 df_registros = carregar_registros(pasta_recibos_manual)
 
 if not df_registros.empty:
-    # Filtrar
     if termo_filtro != 'Todos':
         df_filtrado = df_registros[df_registros['Termo de Colaboração'] == termo_filtro]
     else:
@@ -1295,7 +1319,6 @@ if not df_registros.empty:
     
     st.dataframe(df_filtrado, use_container_width=True)
     
-    # Métricas
     col_m1, col_m2, col_m3 = st.columns(3)
     with col_m1:
         st.metric("Total Registros", len(df_filtrado))
@@ -1309,7 +1332,6 @@ if not df_registros.empty:
     with col_m3:
         st.metric("Registros Filtrados", len(df_filtrado))
     
-    # Download Excel
     excel_path = Path(pasta_recibos_manual).absolute() / "registros_completos.xlsx"
     if excel_path.exists():
         with open(excel_path, 'rb') as f:
@@ -1322,7 +1344,6 @@ if not df_registros.empty:
 else:
     st.info("👆 **Nenhum registro encontrado. Cadastre o primeiro!**")
 
-# Limpeza
 if template_path and os.path.exists(template_path):
     try:
         os.unlink(template_path)
