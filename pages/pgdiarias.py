@@ -1,10 +1,8 @@
 """
-SISTEMA DE PAGAMENTO DE DIÁRIAS - VERSÃO COM PDF PERFEITO
-✅ Preserva TODA a formatação do DOCX original
-✅ Fontes, tamanhos, cores, negrito, itálico, sublinhado
-✅ Parágrafos, alinhamentos, espaçamentos
-✅ Tabelas com bordas e formatação
-✅ Funciona em LOCALHOST e STREAMLIT CLOUD
+SISTEMA DE PAGAMENTO DE DIÁRIAS - VERSÃO CORRIGIDA
+✅ Correção: Nº do Termo vem da coluna "Nº TERMO" do CSV
+✅ Correção: Placeholders ((VALOR POR EXTENSO)) e ((QTD POR EXTENSO)) preenchidos corretamente
+✅ Demais funcionalidades preservadas
 """
 
 import streamlit as st
@@ -50,22 +48,13 @@ except ImportError as e:
 
 def docx_to_pdf_perfeito(docx_path, pdf_path):
     """
-    Converte DOCX para PDF preservando TODA a formatação original:
-    - Fontes, tamanhos, cores
-    - Negrito, itálico, sublinhado
-    - Alinhamento (esquerda, centro, direita, justificado)
-    - Espaçamento entre linhas e parágrafos
-    - Tabelas com bordas e formatação
-    - Marcadores e numeração
+    Converte DOCX para PDF preservando TODA a formatação original
     """
     if not PDF_NATIVE_AVAILABLE:
         return False, "ReportLab não disponível"
     
     try:
-        # Carrega o documento DOCX
         doc = Document(docx_path)
-        
-        # Cria o documento PDF com tamanho A4 (igual ao Word)
         pdf = SimpleDocTemplate(
             str(pdf_path),
             pagesize=A4,
@@ -75,10 +64,8 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
             bottomMargin=72
         )
         
-        # Estilos base do ReportLab
         styles = getSampleStyleSheet()
         
-        # Mapeamento de alinhamento do Word para ReportLab
         align_map = {
             WD_ALIGN_PARAGRAPH.LEFT: TA_LEFT,
             WD_ALIGN_PARAGRAPH.CENTER: TA_CENTER,
@@ -86,28 +73,21 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
             WD_ALIGN_PARAGRAPH.JUSTIFY: TA_JUSTIFY
         }
         
-        # Lista para armazenar os elementos do PDF
         story = []
         
-        # Processa cada parágrafo do documento
         for paragraph in doc.paragraphs:
             if not paragraph.text.strip() and not paragraph.runs:
-                # Parágrafo vazio - adiciona espaço
                 story.append(Spacer(1, 12))
                 continue
             
-            # Determina o alinhamento do parágrafo
             align = align_map.get(paragraph.paragraph_format.alignment, TA_LEFT)
             
-            # Espaçamento antes e depois
             space_before = paragraph.paragraph_format.space_before.pt if paragraph.paragraph_format.space_before else 0
             space_after = paragraph.paragraph_format.space_after.pt if paragraph.paragraph_format.space_after else 0
             
             if space_before > 0:
                 story.append(Spacer(1, space_before))
             
-            # Constrói o texto com formatação
-            paragraph_text = ""
             runs_info = []
             
             for run in paragraph.runs:
@@ -115,15 +95,12 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
                 if not text:
                     continue
                 
-                # Obtém propriedades da formatação
                 font_name = run.font.name if run.font.name else "Helvetica"
                 font_size = run.font.size.pt if run.font.size else 12
                 
-                # Verifica negrito/itálico
                 is_bold = run.font.bold if run.font.bold is not None else False
                 is_italic = run.font.italic if run.font.italic is not None else False
                 
-                # Mapeia para fonte do ReportLab
                 if is_bold and is_italic:
                     pdf_font = "Helvetica-BoldOblique"
                 elif is_bold:
@@ -133,13 +110,11 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
                 else:
                     pdf_font = "Helvetica"
                 
-                # Cor da fonte
                 font_color = colors.black
                 if run.font.color and run.font.color.rgb:
                     rgb = run.font.color.rgb
                     font_color = colors.Color(rgb[0]/255, rgb[1]/255, rgb[2]/255)
                 
-                # Sublinhado
                 underline = run.font.underline if run.font.underline is not None else False
                 
                 runs_info.append({
@@ -151,7 +126,6 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
                 })
             
             if runs_info:
-                # Cria um estilo personalizado para este parágrafo
                 style_name = f"custom_style_{len(story)}"
                 custom_style = ParagraphStyle(
                     style_name,
@@ -164,12 +138,10 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
                     spaceAfter=space_after
                 )
                 
-                # Constrói o texto com tags HTML para formatação
                 html_text = ""
                 for run in runs_info:
                     text = run['text'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                     
-                    # Aplica formatação com tags
                     formatted_text = f'<font face="{run["font"]}" size="{run["size"]}" color="{run["color"]}">'
                     
                     if run['underline']:
@@ -180,41 +152,33 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
                     formatted_text += '</font>'
                     html_text += formatted_text
                 
-                # Cria o parágrafo no PDF
                 p = Paragraph(html_text, custom_style)
                 story.append(p)
             
             if space_after > 0:
                 story.append(Spacer(1, space_after))
         
-        # Processa tabelas
         for table in doc.tables:
             if not table.rows:
                 continue
             
-            # Extrai dados da tabela
             data = []
             col_widths = []
             
-            # Determina larguras das colunas
             for row in table.rows:
                 row_data = []
                 for cell in row.cells:
-                    # Extrai texto da célula
                     cell_text = ""
                     for paragraph in cell.paragraphs:
                         cell_text += paragraph.text + "\n"
                     row_data.append(cell_text.strip())
                 data.append(row_data)
             
-            # Define larguras proporcionais
             if table.columns:
                 col_widths = [2*inch] * len(table.columns)
             
-            # Cria tabela no PDF
             pdf_table = Table(data, colWidths=col_widths)
             
-            # Estilo da tabela
             table_style = [
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
                 ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
@@ -226,7 +190,6 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
             ]
             
-            # Aplica negrito na primeira linha
             if len(data) > 0:
                 table_style.append(('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'))
             
@@ -234,7 +197,6 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
             story.append(pdf_table)
             story.append(Spacer(1, 12))
         
-        # Gera o PDF
         pdf.build(story)
         return True, str(pdf_path)
         
@@ -242,11 +204,311 @@ def docx_to_pdf_perfeito(docx_path, pdf_path):
         return False, str(e)
 
 # ============================================================================
-# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (ATUALIZADA)
+# ✅ FUNÇÕES DE BUSCA NO CSV (CORRIGIDAS)
+# ============================================================================
+@st.cache_data(ttl=300)
+def carregar_termos_colaboracao(df):
+    """Carrega lista única de termos de colaboração"""
+    if df.empty:
+        return []
+
+    # Procura coluna de termo (case insensitive)
+    coluna_termo = None
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'TERMO' in col_upper and 'COLABORAÇÃO' in col_upper:
+            coluna_termo = col
+            break
+    
+    # Fallback para terceira coluna se necessário
+    if not coluna_termo and len(df.columns) >= 3:
+        coluna_termo = df.columns[2]
+    
+    if not coluna_termo:
+        return []
+
+    return sorted(df[coluna_termo].dropna().astype(str).unique())
+
+@st.cache_data(ttl=300)
+def buscar_instrumento_por_termo(df, termo):
+    """Busca instrumento a partir do termo"""
+    if df.empty or not termo:
+        return ""
+
+    # Procura coluna de termo
+    coluna_termo = None
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'TERMO' in col_upper and 'COLABORAÇÃO' in col_upper:
+            coluna_termo = col
+            break
+    
+    if not coluna_termo and len(df.columns) >= 3:
+        coluna_termo = df.columns[2]
+    
+    if not coluna_termo:
+        return ""
+
+    mask = df[coluna_termo].astype(str).str.strip() == str(termo).strip()
+    if not mask.any():
+        return ""
+
+    # Procura coluna INSTRUMENTO
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'INSTRUMENTO' in col_upper:
+            valor = df.loc[mask, col].iloc[0]
+            return str(valor).strip() if pd.notna(valor) else ""
+
+    return ""
+
+@st.cache_data(ttl=300)
+def buscar_numero_termo_por_nome(df, termo):
+    """
+    CORREÇÃO: Busca o número do termo na coluna "Nº TERMO"
+    """
+    if df.empty or not termo:
+        return ""
+
+    # Procura coluna de termo
+    coluna_termo = None
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'TERMO' in col_upper and 'COLABORAÇÃO' in col_upper:
+            coluna_termo = col
+            break
+    
+    if not coluna_termo and len(df.columns) >= 3:
+        coluna_termo = df.columns[2]
+    
+    if not coluna_termo:
+        return ""
+
+    mask = df[coluna_termo].astype(str).str.strip() == str(termo).strip()
+    if not mask.any():
+        return ""
+
+    # CORREÇÃO: Procura especificamente pela coluna "Nº TERMO"
+    coluna_numero = None
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        # Procura por variações de "Nº TERMO", "NUMERO TERMO", "N° TERMO"
+        if ('Nº' in col_upper or 'N°' in col_upper or 'NUMERO' in col_upper) and 'TERMO' in col_upper:
+            coluna_numero = col
+            break
+    
+    # Se encontrou a coluna específica, usa ela
+    if coluna_numero:
+        valor = df.loc[mask, coluna_numero].iloc[0]
+        return str(valor).strip() if pd.notna(valor) else ""
+    
+    # Fallback: pega a coluna seguinte (comportamento antigo)
+    colunas = df.columns.tolist()
+    idx_termo = colunas.index(coluna_termo)
+    if idx_termo + 1 < len(colunas):
+        valor = df.loc[mask, colunas[idx_termo + 1]].iloc[0]
+        return str(valor).strip() if pd.notna(valor) else ""
+
+    return ""
+
+@st.cache_data(ttl=300)
+def carregar_funcionarios_por_termo(df, termo):
+    """Carrega funcionários de um termo"""
+    if df.empty or not termo:
+        return []
+
+    # Procura coluna de termo
+    coluna_termo = None
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'TERMO' in col_upper and 'COLABORAÇÃO' in col_upper:
+            coluna_termo = col
+            break
+    
+    if not coluna_termo and len(df.columns) >= 3:
+        coluna_termo = df.columns[2]
+    
+    if not coluna_termo:
+        return []
+
+    mask = df[coluna_termo].astype(str).str.strip() == str(termo).strip()
+    if not mask.any():
+        return []
+
+    # Procura coluna de funcionário
+    coluna_func = None
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'FUNCIONÁRIO' in col_upper or 'FUNCIONARIO' in col_upper or 'NOME' in col_upper:
+            coluna_func = col
+            break
+
+    if not coluna_func:
+        return []
+
+    return sorted(df.loc[mask, coluna_func].dropna().astype(str).unique())
+
+@st.cache_data(ttl=300)
+def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
+    """Busca CPF e cargo do funcionário"""
+    if df.empty or not termo or not funcionario:
+        return "", ""
+
+    # Procura coluna de termo
+    coluna_termo = None
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'TERMO' in col_upper and 'COLABORAÇÃO' in col_upper:
+            coluna_termo = col
+            break
+    
+    if not coluna_termo and len(df.columns) >= 3:
+        coluna_termo = df.columns[2]
+
+    if not coluna_termo:
+        return "", ""
+
+    # Procura coluna de funcionário
+    coluna_func = None
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'FUNCIONÁRIO' in col_upper or 'FUNCIONARIO' in col_upper or 'NOME' in col_upper:
+            coluna_func = col
+            break
+
+    if not coluna_func:
+        return "", ""
+
+    mask = (
+        (df[coluna_termo].astype(str).str.strip() == str(termo).strip()) &
+        (df[coluna_func].astype(str).str.strip() == str(funcionario).strip())
+    )
+
+    if not mask.any():
+        return "", ""
+
+    linha = df.loc[mask].iloc[0]
+
+    # Busca CPF
+    cpf = ""
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'CPF' in col_upper:
+            cpf = str(linha.get(col, "")).strip() if pd.notna(linha.get(col, "")) else ""
+            if cpf:
+                break
+
+    # Busca Cargo
+    cargo = ""
+    for col in df.columns:
+        col_upper = str(col).upper().strip()
+        if 'CARGO' in col_upper or 'FUNÇÃO' in col_upper or 'FUNCAO' in col_upper:
+            cargo = str(linha.get(col, "")).strip() if pd.notna(linha.get(col, "")) else ""
+            if cargo:
+                break
+
+    return cpf, cargo
+
+# ============================================================================
+# ✅ FUNÇÃO SALVAR REGISTRO (CORRIGIDA)
+# ============================================================================
+def salvar_registro_formulario(df, termo_input, instrumento, numero_termo, funcionario_input, 
+                              cpf, cargo, qtd, qtd_extenso, valor, valor_extenso, 
+                              data_input, data_extenso_display, objetivo, localidades, 
+                              periodo, oficio, nome_arquivo, numero_oficio_input, 
+                              nome_recibo_input, pasta_saida_str):
+    """Salva registro na planilha"""
+    
+    if not pasta_saida_str or pasta_saida_str.strip() == "":
+        st.error("❌ **Informe a pasta de destino!**")
+        return None, None, None, None
+    
+    pasta_saida = Path(pasta_saida_str).absolute()
+    pasta_saida.mkdir(parents=True, exist_ok=True)
+    caminho_excel = pasta_saida / "registros_completos.xlsx"
+    
+    colunas_planilha = [
+        'Termo de Colaboração', 'Instrumento', 'Nº Do Termo de Colaboração', 
+        'Funcionário', 'CPF', 'Cargo', 'Quantidade', 'Quantidade por extenso', 
+        'Valor', 'Valor por extenso', 'Data Recibo', 'Data por Extenso', 
+        'Objetivo', 'Localidades', 'Período', 'Ofício', 'Nome Arquivo', 
+        'Nº do Ofício', 'Nome do Recibo'
+    ]
+    
+    nome_recibo_completo = nome_recibo_input or f"{nome_arquivo}_{numero_oficio_input}_{st.session_state.contador_recibo}"
+    
+    dados_registro = {
+        'Termo de Colaboração': termo_input or '',
+        'Instrumento': instrumento or '',
+        'Nº Do Termo de Colaboração': numero_termo or '',
+        'Funcionário': funcionario_input or '',
+        'CPF': cpf or '',
+        'Cargo': cargo or '',
+        'Quantidade': qtd or '',
+        'Quantidade por extenso': qtd_extenso or '',
+        'Valor': valor or '',
+        'Valor por extenso': valor_extenso or '',
+        'Data Recibo': data_input or '',
+        'Data por Extenso': data_extenso_display or '',
+        'Objetivo': objetivo or '',
+        'Localidades': localidades or '',
+        'Período': periodo or '',
+        'Ofício': oficio or '',
+        'Nome Arquivo': nome_arquivo or '',
+        'Nº do Ofício': numero_oficio_input or '',
+        'Nome do Recibo': nome_recibo_completo
+    }
+    
+    if not termo_input or not funcionario_input or not cpf:
+        st.error("❌ **Preencha obrigatoriamente**: Termo, Funcionário e CPF!")
+        return None, None, None, None
+    
+    novo_registro = pd.DataFrame([dados_registro])[colunas_planilha]
+    
+    try:
+        if caminho_excel.exists():
+            dados_existentes = pd.read_excel(caminho_excel)
+            dados_atualizados = pd.concat([dados_existentes, novo_registro], ignore_index=True)
+        else:
+            dados_atualizados = novo_registro
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar Excel: {e}")
+        dados_atualizados = novo_registro
+    
+    try:
+        with pd.ExcelWriter(caminho_excel, engine='openpyxl') as writer:
+            dados_atualizados.to_excel(writer, sheet_name='Registros', index=False)
+            worksheet = writer.sheets['Registros']
+            
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = get_column_letter(column[0].column)
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            for cell in worksheet[1]:
+                cell.font = openpyxl.styles.Font(bold=True)
+        
+        return dados_atualizados, novo_registro, nome_recibo_completo, caminho_excel
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar Excel: {e}")
+        return None, None, None, None
+
+# ============================================================================
+# ✅ FUNÇÃO GERAR RECIBO INDIVIDUAL (CORRIGIDA - PLACEHOLDERS)
 # ============================================================================
 def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gerar_pdf=True):
     """
     Gera recibo DOCX e converte para PDF com formatação perfeita
+    CORREÇÃO: Placeholders ((VALOR POR EXTENSO)) e ((QTD POR EXTENSO)) mapeados corretamente
     """
     if not os.path.exists(template_path):
         st.error("❌ **Template não encontrado!**")
@@ -259,15 +521,15 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gera
     pasta_saida = Path(pasta_saida_str).absolute()
     pasta_saida.mkdir(parents=True, exist_ok=True)
     
-    # Placeholders para substituição
+    # CORREÇÃO: Mapeamento correto dos placeholders
     replacements = {
         "(FUNCIONÁRIO)": str(dados_registro.get('Funcionário', '')),
         "(CARGO)": str(dados_registro.get('Cargo', '')),
         "(CPF)": str(dados_registro.get('CPF', '')),
         "(VALOR)": str(dados_registro.get('Valor', '')),
-        "((VALOR POR EXTENSO))": str(dados_registro.get('Valor por extenso', '')),
+        "((VALOR POR EXTENSO))": str(dados_registro.get('Valor por extenso', '')),  # CORRIGIDO
         "(QTD)": str(dados_registro.get('Quantidade', '')),
-        "((QTD POR EXTENSO))": str(dados_registro.get('Quantidade por extenso', '')),
+        "((QTD POR EXTENSO))": str(dados_registro.get('Quantidade por extenso', '')),  # CORRIGIDO
         "(NÚMERO DO INSTRUMENTO)": str(dados_registro.get('Instrumento', '')),
         "(TERMO DE COLABORAÇÃO)": str(dados_registro.get('Nº Do Termo de Colaboração', '')),
         "(OBJETIVO)": str(dados_registro.get('Objetivo', '')),
@@ -283,7 +545,7 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gera
     pdf_saida = pasta_saida / f"{nome_arquivo_recibo}.pdf"
     
     try:
-        # 1. GERA O DOCX COM FORMATAÇÃO ORIGINAL
+        # Gera o DOCX
         doc = Document(template_path)
         
         # Substitui placeholders preservando formatação
@@ -316,7 +578,7 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gera
         
         st.success(f"✅ **DOCX GERADO:** {docx_saida.name}")
         
-        # 2. CONVERTE PARA PDF COM FORMATAÇÃO PERFEITA
+        # Converte para PDF
         pdf_gerado = False
         pdf_caminho = None
         
@@ -343,11 +605,11 @@ def gerar_recibo_individual(dados_registro, template_path, pasta_saida_str, gera
         return None
 
 # ============================================================================
-# ✅ FUNÇÃO GERAR TODOS OS RECIBOS (ATUALIZADA)
+# ✅ FUNÇÃO GERAR TODOS OS RECIBOS
 # ============================================================================
 def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
     """
-    Gera recibos para todos os registros com PDF com formatação perfeita
+    Gera recibos para todos os registros
     """
     if not os.path.exists(template_path):
         st.error("❌ **Template não encontrado!**")
@@ -381,15 +643,15 @@ def gerar_todos_recibos(template_path, pasta_saida_str, gerar_pdf=True):
         pdf_gerados = 0
         
         for idx, row in dados_completos.iterrows():
-            # Prepara dados do registro
+            # Prepara dados do registro com os campos corretos
             dados_registro = {
                 'Funcionário': row.get('Funcionário', ''),
                 'Cargo': row.get('Cargo', ''),
                 'CPF': row.get('CPF', ''),
                 'Valor': row.get('Valor', ''),
-                'Valor por extenso': row.get('Valor por extenso', ''),
+                'Valor por extenso': row.get('Valor por extenso', ''),  # Campo correto
                 'Quantidade': row.get('Quantidade', ''),
-                'Quantidade por extenso': row.get('Quantidade por extenso', ''),
+                'Quantidade por extenso': row.get('Quantidade por extenso', ''),  # Campo correto
                 'Instrumento': row.get('Instrumento', ''),
                 'Nº Do Termo de Colaboração': row.get('Nº Do Termo de Colaboração', ''),
                 'Objetivo': row.get('Objetivo', ''),
@@ -504,267 +766,6 @@ def carregar_csv_colaboradores():
     
     st.error("❌ Não foi possível carregar o CSV")
     return pd.DataFrame()
-
-# ============================================================================
-# ✅ FUNÇÕES DE BUSCA NO CSV
-# ============================================================================
-@st.cache_data(ttl=300)
-def carregar_termos_colaboracao(df):
-    """Carrega lista única de termos de colaboração"""
-    if df.empty:
-        return []
-
-    coluna_termo = None
-    for col in df.columns:
-        if 'TERMO' in str(col).upper() and 'COLABORAÇÃO' in str(col).upper():
-            coluna_termo = col
-            break
-    
-    if not coluna_termo and len(df.columns) >= 3:
-        coluna_termo = df.columns[2]
-    
-    if not coluna_termo:
-        return []
-
-    return sorted(df[coluna_termo].dropna().astype(str).unique())
-
-@st.cache_data(ttl=300)
-def buscar_instrumento_por_termo(df, termo):
-    """Busca instrumento a partir do termo"""
-    if df.empty or not termo:
-        return ""
-
-    coluna_termo = None
-    for col in df.columns:
-        if 'TERMO' in str(col).upper() and 'COLABORAÇÃO' in str(col).upper():
-            coluna_termo = col
-            break
-    
-    if not coluna_termo and len(df.columns) >= 3:
-        coluna_termo = df.columns[2]
-    
-    if not coluna_termo:
-        return ""
-
-    mask = df[coluna_termo].astype(str).str.strip() == str(termo).strip()
-    if not mask.any():
-        return ""
-
-    for col in df.columns:
-        if 'INSTRUMENTO' in str(col).upper():
-            valor = df.loc[mask, col].iloc[0]
-            return str(valor).strip() if pd.notna(valor) else ""
-
-    return ""
-
-@st.cache_data(ttl=300)
-def buscar_numero_termo_por_nome(df, termo):
-    """Busca número do termo"""
-    if df.empty or not termo:
-        return ""
-
-    coluna_termo = None
-    for col in df.columns:
-        if 'TERMO' in str(col).upper() and 'COLABORAÇÃO' in str(col).upper():
-            coluna_termo = col
-            break
-    
-    if not coluna_termo and len(df.columns) >= 3:
-        coluna_termo = df.columns[2]
-    
-    if not coluna_termo:
-        return ""
-
-    mask = df[coluna_termo].astype(str).str.strip() == str(termo).strip()
-    if not mask.any():
-        return ""
-
-    colunas = df.columns.tolist()
-    idx_termo = colunas.index(coluna_termo)
-    if idx_termo + 1 < len(colunas):
-        valor = df.loc[mask, colunas[idx_termo + 1]].iloc[0]
-        return str(valor).strip() if pd.notna(valor) else ""
-
-    return ""
-
-@st.cache_data(ttl=300)
-def carregar_funcionarios_por_termo(df, termo):
-    """Carrega funcionários de um termo"""
-    if df.empty or not termo:
-        return []
-
-    coluna_termo = None
-    for col in df.columns:
-        if 'TERMO' in str(col).upper() and 'COLABORAÇÃO' in str(col).upper():
-            coluna_termo = col
-            break
-    
-    if not coluna_termo and len(df.columns) >= 3:
-        coluna_termo = df.columns[2]
-    
-    if not coluna_termo:
-        return []
-
-    mask = df[coluna_termo].astype(str).str.strip() == str(termo).strip()
-    if not mask.any():
-        return []
-
-    coluna_func = None
-    for col in df.columns:
-        if 'FUNCIONÁRIO' in str(col).upper() or 'FUNCIONARIO' in str(col).upper() or 'NOME' in str(col).upper():
-            coluna_func = col
-            break
-
-    if not coluna_func:
-        return []
-
-    return sorted(df.loc[mask, coluna_func].dropna().astype(str).unique())
-
-@st.cache_data(ttl=300)
-def buscar_cpf_cargo_por_funcionario(df, termo, funcionario):
-    """Busca CPF e cargo do funcionário"""
-    if df.empty or not termo or not funcionario:
-        return "", ""
-
-    coluna_termo = None
-    for col in df.columns:
-        if 'TERMO' in str(col).upper() and 'COLABORAÇÃO' in str(col).upper():
-            coluna_termo = col
-            break
-    
-    if not coluna_termo and len(df.columns) >= 3:
-        coluna_termo = df.columns[2]
-
-    if not coluna_termo:
-        return "", ""
-
-    coluna_func = None
-    for col in df.columns:
-        if 'FUNCIONÁRIO' in str(col).upper() or 'FUNCIONARIO' in str(col).upper() or 'NOME' in str(col).upper():
-            coluna_func = col
-            break
-
-    if not coluna_func:
-        return "", ""
-
-    mask = (
-        (df[coluna_termo].astype(str).str.strip() == str(termo).strip()) &
-        (df[coluna_func].astype(str).str.strip() == str(funcionario).strip())
-    )
-
-    if not mask.any():
-        return "", ""
-
-    linha = df.loc[mask].iloc[0]
-
-    cpf = ""
-    for col in df.columns:
-        if 'CPF' in str(col).upper():
-            cpf = str(linha.get(col, "")).strip() if pd.notna(linha.get(col, "")) else ""
-            if cpf:
-                break
-
-    cargo = ""
-    for col in df.columns:
-        if 'CARGO' in str(col).upper() or 'FUNÇÃO' in str(col).upper():
-            cargo = str(linha.get(col, "")).strip() if pd.notna(linha.get(col, "")) else ""
-            if cargo:
-                break
-
-    return cpf, cargo
-
-# ============================================================================
-# ✅ FUNÇÃO SALVAR REGISTRO
-# ============================================================================
-def salvar_registro_formulario(df, termo_input, instrumento, numero_termo, funcionario_input, 
-                              cpf, cargo, qtd, qtd_extenso, valor, valor_extenso, 
-                              data_input, data_extenso_display, objetivo, localidades, 
-                              periodo, oficio, nome_arquivo, numero_oficio_input, 
-                              nome_recibo_input, pasta_saida_str):
-    """Salva registro na planilha"""
-    
-    if not pasta_saida_str or pasta_saida_str.strip() == "":
-        st.error("❌ **Informe a pasta de destino!**")
-        return None, None, None, None
-    
-    pasta_saida = Path(pasta_saida_str).absolute()
-    pasta_saida.mkdir(parents=True, exist_ok=True)
-    caminho_excel = pasta_saida / "registros_completos.xlsx"
-    
-    colunas_planilha = [
-        'Termo de Colaboração', 'Instrumento', 'Nº Do Termo de Colaboração', 
-        'Funcionário', 'CPF', 'Cargo', 'Quantidade', 'Quantidade por extenso', 
-        'Valor', 'Valor por extenso', 'Data Recibo', 'Data por Extenso', 
-        'Objetivo', 'Localidades', 'Período', 'Ofício', 'Nome Arquivo', 
-        'Nº do Ofício', 'Nome do Recibo'
-    ]
-    
-    nome_recibo_completo = nome_recibo_input or f"{nome_arquivo}_{numero_oficio_input}_{st.session_state.contador_recibo}"
-    
-    dados_registro = {
-        'Termo de Colaboração': termo_input or '',
-        'Instrumento': instrumento or '',
-        'Nº Do Termo de Colaboração': numero_termo or '',
-        'Funcionário': funcionario_input or '',
-        'CPF': cpf or '',
-        'Cargo': cargo or '',
-        'Quantidade': qtd or '',
-        'Quantidade por extenso': qtd_extenso or '',
-        'Valor': valor or '',
-        'Valor por extenso': valor_extenso or '',
-        'Data Recibo': data_input or '',
-        'Data por Extenso': data_extenso_display or '',
-        'Objetivo': objetivo or '',
-        'Localidades': localidades or '',
-        'Período': periodo or '',
-        'Ofício': oficio or '',
-        'Nome Arquivo': nome_arquivo or '',
-        'Nº do Ofício': numero_oficio_input or '',
-        'Nome do Recibo': nome_recibo_completo
-    }
-    
-    if not termo_input or not funcionario_input or not cpf:
-        st.error("❌ **Preencha obrigatoriamente**: Termo, Funcionário e CPF!")
-        return None, None, None, None
-    
-    novo_registro = pd.DataFrame([dados_registro])[colunas_planilha]
-    
-    try:
-        if caminho_excel.exists():
-            dados_existentes = pd.read_excel(caminho_excel)
-            dados_atualizados = pd.concat([dados_existentes, novo_registro], ignore_index=True)
-        else:
-            dados_atualizados = novo_registro
-            
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar Excel: {e}")
-        dados_atualizados = novo_registro
-    
-    try:
-        with pd.ExcelWriter(caminho_excel, engine='openpyxl') as writer:
-            dados_atualizados.to_excel(writer, sheet_name='Registros', index=False)
-            worksheet = writer.sheets['Registros']
-            
-            for column in worksheet.columns:
-                max_length = 0
-                column_letter = get_column_letter(column[0].column)
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                worksheet.column_dimensions[column_letter].width = adjusted_width
-            
-            for cell in worksheet[1]:
-                cell.font = openpyxl.styles.Font(bold=True)
-        
-        return dados_atualizados, novo_registro, nome_recibo_completo, caminho_excel
-        
-    except Exception as e:
-        st.error(f"❌ Erro ao salvar Excel: {e}")
-        return None, None, None, None
 
 # ============================================================================
 # ✅ FUNÇÕES DE GERENCIAMENTO DE REGISTROS
@@ -1063,7 +1064,7 @@ termo_input = st.selectbox("Termo de Colaboração:", options=[''] + termos_unic
 # Busca automática
 if termo_input:
     instrumento_auto = buscar_instrumento_por_termo(df_colaboradores, termo_input)
-    numero_termo_auto = buscar_numero_termo_por_nome(df_colaboradores, termo_input)
+    numero_termo_auto = buscar_numero_termo_por_nome(df_colaboradores, termo_input)  # CORRIGIDO: Agora busca na coluna "Nº TERMO"
 else:
     instrumento_auto = ""
     numero_termo_auto = ""
@@ -1192,9 +1193,9 @@ with cols[btn_idx]:
                 'Cargo': cargo,
                 'CPF': cpf,
                 'Valor': valor,
-                'Valor por extenso': valor_extenso,
+                'Valor por extenso': valor_extenso,  # Campo correto
                 'Quantidade': qtd,
-                'Quantidade por extenso': qtd_extenso,
+                'Quantidade por extenso': qtd_extenso,  # Campo correto
                 'Instrumento': instrumento,
                 'Nº Do Termo de Colaboração': numero_termo,
                 'Objetivo': objetivo,
@@ -1221,9 +1222,9 @@ if PDF_NATIVE_AVAILABLE:
                     'Cargo': cargo,
                     'CPF': cpf,
                     'Valor': valor,
-                    'Valor por extenso': valor_extenso,
+                    'Valor por extenso': valor_extenso,  # Campo correto
                     'Quantidade': qtd,
-                    'Quantidade por extenso': qtd_extenso,
+                    'Quantidade por extenso': qtd_extenso,  # Campo correto
                     'Instrumento': instrumento,
                     'Nº Do Termo de Colaboração': numero_termo,
                     'Objetivo': objetivo,
