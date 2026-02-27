@@ -1073,7 +1073,7 @@ with st.sidebar:
 # ============================================================================
 # PASTA DE DESTINO
 # ============================================================================
-st.title("📋 Pagamento de Diárias - PDF com Formatação Original")
+st.title("📋 Recibos de Diárias")
 st.markdown("---")
 
 pasta_sugerida = "C:/Users/Vinicius Guanabara/Desktop/diarias" if not is_deployed() else "/mount/src/gerenciador_admfinanceiro/diarias"
